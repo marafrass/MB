@@ -1,0 +1,119 @@
+{
+  "MURDER_BOARD": {
+    "Title": "Murder Board",
+    "Description": "An interactive and collaborative module for visualization",
+    
+    "Settings": {
+      "DefaultBoardType": {
+        "Name": "Default Board Type",
+        "Hint": "Choose the default board type when creating a new Murder Board"
+      },
+      "SuppressNotifications": {
+        "Name": "Suppress Notifications",
+        "Hint": "When enabled, Murder Board notifications will not be displayed"
+      },
+      "EnableDragDropUpload": {
+        "Name": "Enable Drag-and-Drop Image Upload",
+        "Hint": "Allow users to drag and drop images from their filesystem directly onto the board to create image items"
+      }
+    },
+
+    "BoardTypes": {
+      "Chalkboard": "Chalkboard (Green)",
+      "Corkboard": "Corkboard",
+      "Whiteboard": "Whiteboard",
+      "Blackboard": "Blackboard"
+    },
+
+    "ItemTypes": {
+      "Note": "Sticky Note",
+      "Text": "Text",
+      "Image": "Image",
+      "Document": "Document"
+    },
+
+    "Controls": {
+      "OpenBoard": "Open Murder Board",
+      "AddItem": "Add Item",
+      "ConnectItems": "Create Connection",
+      "ClearBoard": "Clear Board",
+      "ExportBoard": "Export Board",
+      "ImportBoard": "Import Board"
+    },
+
+    "Dialogs": {
+      "AddNote": "Add Sticky Note",
+      "EditNote": "Edit Sticky Note",
+      "AddText": "Add Text",
+      "EditText": "Edit Text",
+      "AddImage": "Add Image",
+      "EditImage": "Edit Image",
+      "AddDocument": "Add Document",
+      "EditDocument": "Edit Document",
+      "EditItem": "Edit Item",
+      "DeleteConfirm": "Delete this item?",
+      "ConfirmDelete": "Confirm Deletion",
+      "DeleteItemConfirm": "Are you sure you want to delete this item? All connections to this item will also be removed.",
+      "DeleteMultipleItemsConfirm": "Are you sure you want to delete {count} items? All connections involving these items will also be removed.",
+      "ColorPicker": "Choose Color",
+      "Content": "Content",
+      "ImageURL": "Image URL",
+      "Text": "Text",
+      "Color": "Color",
+      "FastenerType": "Fastener Type",
+      "Pushpin": "Pushpin",
+      "TapeTop": "Tape (Top)",
+      "TapeTopBottom": "Tape (Top & Bottom)",
+      "TapeAllCorners": "Tape (All Corners)",
+      "DefaultConnectionColor": "Default Connection Color"
+    },
+
+    "UI": {
+      "Save": "Save",
+      "Cancel": "Cancel",
+      "Delete": "Delete",
+      "Edit": "Edit",
+      "Duplicate": "Duplicate",
+      "Close": "Close",
+      "Create": "Create",
+      "Add": "Add",
+      "Remove": "Remove",
+      "Export": "Export",
+      "Import": "Import",
+      "AddNote": "Add Note",
+      "AddText": "Add Text",
+      "AddImage": "Add Image",
+      "AddDocument": "Add Document",
+      "Color": "Color"
+    },
+
+    "Notifications": {
+      "ItemAdded": "Item added to board",
+      "ItemUpdated": "Item updated",
+      "ItemDeleted": "Item removed from board",
+      "ItemsDeleted": "{count} items removed from board",
+      "ItemDuplicated": "Item duplicated",
+      "ConnectionCreated": "Connection created",
+      "ConnectionDeleted": "Connection removed",
+      "ConnectionUpdated": "Connection updated",
+      "BoardCleared": "Board cleared",
+      "BoardExported": "Board exported successfully",
+      "BoardImported": "Board imported successfully",
+      "ExportFailed": "Failed to export board",
+      "ImportFailed": "Failed to import board",
+      "DeleteError": "Failed to delete items",
+      "CenterShown": "Center point is now visible",
+      "CenterHidden": "Center point is now hidden",
+      "CannotEdit": "You do not have permission to edit this board",
+      "InvalidFileType": "Invalid file type: {type}. Only image files are supported.",
+      "UploadError": "Failed to upload {filename}",
+      "DropError": "Error processing dropped files",
+      "ImagesUploaded": "{count} image(s) added to the board",
+      "ItemCreated": "{name} added to the board",
+      "TooManyFiles": "Too many files. Maximum {max} files per upload",
+      "FileTooLarge": "File '{filename}' exceeds maximum size ({max})",
+      "EmptyFile": "File '{filename}' is empty",
+      "SecurityError": "Security validation failed for uploaded file"
+    }
+  }
+}

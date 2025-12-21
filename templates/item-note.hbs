@@ -1,0 +1,44 @@
+<form class="murder-board-item-form">
+  <div class="form-group">
+    <label for="note-label">Note Text</label>
+    <input type="text" id="note-label" name="label" value="{{label}}" placeholder="Enter note text..." autofocus class="form-input">
+  </div>
+
+  {{> color-picker 
+    name="color"
+    colors=colors
+    currentColor=color
+    label="Note Color"
+  }}
+
+  {{> color-picker 
+    name="textColor"
+    colors=colors
+    currentColor=data.textColor
+    label="Text Color"
+  }}
+
+  {{> font-select 
+    name="font"
+    fonts=availableFonts
+    currentFont=data.font
+    label="Font Family"
+  }}
+
+  <div class="form-group">
+    <label class="checkbox-label">
+      <input type="checkbox" name="acceptsConnections" value="on" {{#if acceptsConnections}}checked{{/if}}>
+      <span>Accepts Connections</span>
+    </label>
+  </div>
+
+  <input type="hidden" name="x" value="{{x}}">
+  <input type="hidden" name="y" value="{{y}}">
+
+  {{> dialog-buttons 
+    submitLabel=(localize 'MURDER_BOARD.UI.Save')
+    submitIcon="fa-save"
+    cancelLabel=(localize 'MURDER_BOARD.UI.Cancel')
+    cancelIcon="fa-times"
+  }}
+</form>

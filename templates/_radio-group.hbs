@@ -1,0 +1,36 @@
+{{!-- Radio Group Component --}}
+{{!-- 
+  Usage: {{> radio-group 
+    name="preset" 
+    options=options 
+    currentValue=data.preset
+    variant="icons|colors|labels"
+    label="Document Size"
+  }}
+  
+  Options array format:
+  [
+    { value: "small", label: "Small", icon: "fa-square" },
+    { value: "medium", label: "Medium", icon: "fa-rectangle" }
+  ]
+--}}
+
+<div class="form-group">
+  {{#if label}}<label class="form-label">{{label}}</label>{{/if}}
+  
+  <div class="radio-group radio-group-{{variant}}">
+    {{#each options}}
+    <input 
+      type="radio" 
+      id="{{../name}}-{{this.value}}" 
+      name="{{../name}}" 
+      value="{{this.value}}"
+      {{#if (eq this.value ../currentValue)}}checked{{/if}}
+    >
+    <label for="{{../name}}-{{this.value}}" class="radio-label">
+      {{#if this.icon}}<i class="fas {{this.icon}}"></i>{{/if}}
+      <span>{{this.label}}</span>
+    </label>
+    {{/each}}
+  </div>
+</div>

@@ -1,0 +1,42 @@
+<form class="murder-board-item-form">
+  <div class="form-group">
+    <label for="text-label">Text Content</label>
+    <textarea id="text-label" name="label" placeholder="Enter text..." autofocus class="form-textarea">{{#if label}}{{label}}{{/if}}</textarea>
+  </div>
+
+  {{> color-picker 
+    name="textColor"
+    colors=colors
+    currentColor=data.textColor
+    label="Text Color"
+  }}
+
+  {{> font-select 
+    name="font"
+    fonts=availableFonts
+    currentFont=data.font
+    label="Font Family"
+  }}
+
+  <div class="form-group">
+    <label for="text-size">Font Size</label>
+    <input type="number" id="text-size" name="fontSize" value="{{data.fontSize}}" min="8" max="72" step="1" class="form-input">
+  </div>
+
+  <div class="form-group">
+    <label class="checkbox-label">
+      <input type="checkbox" name="acceptsConnections" value="on" {{#if acceptsConnections}}checked{{/if}}>
+      <span>Accepts Connections</span>
+    </label>
+  </div>
+
+  <input type="hidden" name="x" value="{{x}}">
+  <input type="hidden" name="y" value="{{y}}">
+
+  {{> dialog-buttons 
+    submitLabel=(localize 'MURDER_BOARD.UI.Save')
+    submitIcon="fa-save"
+    cancelLabel=(localize 'MURDER_BOARD.UI.Cancel')
+    cancelIcon="fa-times"
+  }}
+</form>

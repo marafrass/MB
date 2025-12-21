@@ -1,0 +1,50 @@
+{{!-- Color Picker Component --}}
+{{!--
+  Usage: {{> color-picker 
+    name="color"
+    colors=colors
+    currentColor=color
+    label="Note Color"
+  }}
+  
+  Colors array format:
+  [
+    { value: "#FFFF99" },
+    { value: "#FFB6C1" }
+  ]
+  
+  Always displays exactly 5 swatches from user's evolving color palette.
+--}}
+
+<div class="form-group">
+  {{#if label}}<label class="form-label">{{label}}</label>{{/if}}
+  
+  <div class="color-picker-inline">
+    <input 
+      type="color" 
+      id="{{name}}-custom" 
+      class="color-picker-input"
+      value="{{currentColor}}"
+      data-field-name="{{name}}"
+    >
+    
+    <div class="color-swatches">
+      {{#each colors}}
+      <input 
+        type="radio" 
+        id="{{../name}}-{{@index}}" 
+        name="{{../name}}" 
+        value="{{this.value}}"
+        {{#if (eq this.value ../currentColor)}}checked{{/if}}
+        class="color-radio"
+      >
+      <label 
+        for="{{../name}}-{{@index}}" 
+        class="swatch" 
+        style="background-color: {{this.value}};"
+        title="{{this.value}}"
+      ></label>
+      {{/each}}
+    </div>
+  </div>
+</div>

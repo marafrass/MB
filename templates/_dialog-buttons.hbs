@@ -1,0 +1,20 @@
+{{!-- Dialog Button Bar Component --}}
+{{!--
+  Usage: {{> dialog-buttons 
+    submitLabel="Save"
+    submitIcon="fa-save"
+    cancelLabel="Cancel"
+    cancelIcon="fa-times"
+  }}
+--}}
+
+<menu class="dialog-buttons">
+  <button type="submit" class="btn btn-primary">
+    <i class="fas {{submitIcon}}"></i>
+    {{submitLabel}}
+  </button>
+  <button type="button" class="btn btn-secondary" data-action="cancel">
+    <i class="fas {{cancelIcon}}"></i>
+    {{cancelLabel}}
+  </button>
+</menu>

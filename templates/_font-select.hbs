@@ -1,0 +1,36 @@
+{{!-- Font Select Component --}}
+{{!--
+  Usage: {{> font-select 
+    name="font"
+    fonts=availableFonts
+    currentFont=data.font
+    label="Font Family"
+  }}
+  
+  Fonts array format:
+  [
+    { value: "Arial", label: "Arial (Clean)" },
+    { value: "Georgia", label: "Georgia (Serif)" }
+  ]
+--}}
+
+<div class="form-group">
+  {{#if label}}<label class="form-label">{{label}}</label>{{/if}}
+  
+  <div class="font-select-wrapper">
+    <select id="{{name}}-select" name="{{name}}" class="murder-board-item-dialog select">
+      {{#each fonts}}
+      <option value="{{this.value}}" {{#if (eq this.value ../currentFont)}}selected{{/if}}>
+        {{this.label}}
+      </option>
+      {{/each}}
+    </select>
+    <span class="font-display">
+      {{#each fonts}}
+        {{#if (eq this.value ../currentFont)}}
+          {{this.label}}
+        {{/if}}
+      {{/each}}
+    </span>
+  </div>
+</div>

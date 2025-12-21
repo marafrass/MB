@@ -1,0 +1,666 @@
+/**
+ * Murder Board - Button System
+ * Comprehensive button styles with size/state variants and consistent behavior
+ * IMPORTANT: All selectors are properly namespaced under specific Murder Board contexts
+ * to avoid affecting core Foundry UI or other modules
+ */
+
+/* ===== Scoped Button Styles ===== */
+/* Only apply button styles within Murder Board application contexts */
+
+.murder-board-item-form .btn,
+.murder-board-application .btn,
+.murder-board-dialog .btn,
+.board-settings-content .btn,
+.color-picker-content .btn {
+  padding: var(--mb-spacing-md) var(--mb-spacing-xl);
+  border: none;
+  border-radius: var(--mb-radius-sm);
+  background: var(--mb-light);
+  color: var(--mb-text);
+  cursor: pointer;
+  font-size: var(--mb-font-md);
+  font-weight: 600;
+  transition: var(--mb-transition-all-normal);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mb-spacing-sm);
+  white-space: nowrap;
+  user-select: none;
+  outline: none;
+  box-shadow: var(--mb-shadow-sm);
+  letter-spacing: 0.3px;
+  font-family: inherit;
+}
+
+.murder-board-item-form .btn:hover,
+.murder-board-application .btn:hover,
+.murder-board-dialog .btn:hover,
+.board-settings-content .btn:hover,
+.color-picker-content .btn:hover {
+  background: var(--mb-border);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+}
+
+.murder-board-item-form .btn:active,
+.murder-board-application .btn:active,
+.murder-board-dialog .btn:active,
+.board-settings-content .btn:active,
+.color-picker-content .btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.murder-board-item-form .btn:disabled,
+.murder-board-application .btn:disabled,
+.murder-board-dialog .btn:disabled,
+.board-settings-content .btn:disabled,
+.color-picker-content .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.murder-board-item-form .btn:focus-visible,
+.murder-board-application .btn:focus-visible,
+.murder-board-dialog .btn:focus-visible,
+.board-settings-content .btn:focus-visible,
+.color-picker-content .btn:focus-visible {
+  outline: 2px solid var(--mb-secondary);
+  outline-offset: 2px;
+}
+
+.murder-board-item-form .btn i,
+.murder-board-application .btn i,
+.murder-board-dialog .btn i,
+.board-settings-content .btn i,
+.color-picker-content .btn i {
+  font-size: 14px;
+  min-width: 16px;
+  text-align: center;
+}
+
+/* ===== Button Sizes ===== */
+
+.murder-board-item-form .btn-xs,
+.murder-board-application .btn-xs,
+.murder-board-dialog .btn-xs,
+.board-settings-content .btn-xs,
+.color-picker-content .btn-xs {
+  padding: 4px 8px;
+  font-size: var(--mb-font-xs);
+  gap: 4px;
+}
+
+.murder-board-item-form .btn-sm,
+.murder-board-application .btn-sm,
+.murder-board-dialog .btn-sm,
+.board-settings-content .btn-sm,
+.color-picker-content .btn-sm {
+  padding: var(--mb-spacing-sm) var(--mb-spacing-md);
+  font-size: var(--mb-font-sm);
+}
+
+.murder-board-item-form .btn-md,
+.murder-board-application .btn-md,
+.murder-board-dialog .btn-md,
+.board-settings-content .btn-md,
+.color-picker-content .btn-md {
+  padding: var(--mb-spacing-md) var(--mb-spacing-lg);
+  font-size: var(--mb-font-md);
+}
+
+.murder-board-item-form .btn-lg,
+.murder-board-application .btn-lg,
+.murder-board-dialog .btn-lg,
+.board-settings-content .btn-lg,
+.color-picker-content .btn-lg {
+  padding: var(--mb-spacing-lg) var(--mb-spacing-xl);
+  font-size: var(--mb-font-lg);
+}
+
+.murder-board-item-form .btn-xl,
+.murder-board-application .btn-xl,
+.murder-board-dialog .btn-xl,
+.board-settings-content .btn-xl,
+.color-picker-content .btn-xl {
+  padding: var(--mb-spacing-xl) var(--mb-spacing-2xl);
+  font-size: var(--mb-font-xl);
+}
+
+/* ===== Button Variants ===== */
+
+.murder-board-item-form .btn-primary,
+.murder-board-application .btn-primary,
+.murder-board-dialog .btn-primary,
+.board-settings-content .btn-primary,
+.color-picker-content .btn-primary {
+  background: linear-gradient(135deg, var(--mb-primary) 0%, var(--mb-primary-dark) 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);
+}
+
+.murder-board-item-form .btn-primary:hover,
+.murder-board-application .btn-primary:hover,
+.murder-board-dialog .btn-primary:hover,
+.board-settings-content .btn-primary:hover,
+.color-picker-content .btn-primary:hover {
+  box-shadow: 0 6px 16px rgba(76, 175, 80, 0.3);
+  background: var(--mb-primary-dark);
+}
+
+.murder-board-item-form .btn-primary:active,
+.murder-board-application .btn-primary:active,
+.murder-board-dialog .btn-primary:active,
+.board-settings-content .btn-primary:active,
+.color-picker-content .btn-primary:active {
+  box-shadow: 0 2px 4px rgba(76, 175, 80, 0.2);
+}
+
+.murder-board-item-form .btn-secondary,
+.murder-board-application .btn-secondary,
+.murder-board-dialog .btn-secondary,
+.board-settings-content .btn-secondary,
+.color-picker-content .btn-secondary {
+  background: linear-gradient(135deg, var(--mb-secondary) 0%, var(--mb-secondary-dark) 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.2);
+}
+
+.murder-board-item-form .btn-secondary:hover,
+.murder-board-application .btn-secondary:hover,
+.murder-board-dialog .btn-secondary:hover,
+.board-settings-content .btn-secondary:hover,
+.color-picker-content .btn-secondary:hover {
+  box-shadow: 0 6px 16px rgba(33, 150, 243, 0.3);
+  background: var(--mb-secondary-dark);
+}
+
+.murder-board-item-form .btn-secondary:active,
+.murder-board-application .btn-secondary:active,
+.murder-board-dialog .btn-secondary:active,
+.board-settings-content .btn-secondary:active,
+.color-picker-content .btn-secondary:active {
+  box-shadow: 0 2px 4px rgba(33, 150, 243, 0.2);
+}
+
+.murder-board-item-form .btn-accent,
+.murder-board-application .btn-accent,
+.murder-board-dialog .btn-accent,
+.board-settings-content .btn-accent,
+.color-picker-content .btn-accent {
+  background: linear-gradient(135deg, var(--mb-accent) 0%, #f57c00 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.2);
+}
+
+.murder-board-item-form .btn-accent:hover,
+.murder-board-application .btn-accent:hover,
+.murder-board-dialog .btn-accent:hover,
+.board-settings-content .btn-accent:hover,
+.color-picker-content .btn-accent:hover {
+  box-shadow: 0 6px 16px rgba(255, 152, 0, 0.3);
+  background: #f57c00;
+}
+
+.murder-board-item-form .btn-accent:active,
+.murder-board-application .btn-accent:active,
+.murder-board-dialog .btn-accent:active,
+.board-settings-content .btn-accent:active,
+.color-picker-content .btn-accent:active {
+  box-shadow: 0 2px 4px rgba(255, 152, 0, 0.2);
+}
+
+.murder-board-item-form .btn-danger,
+.murder-board-application .btn-danger,
+.murder-board-dialog .btn-danger,
+.board-settings-content .btn-danger,
+.color-picker-content .btn-danger {
+  background: linear-gradient(135deg, var(--mb-danger) 0%, #d32f2f 100%);
+  color: white;
+  box-shadow: 0 2px 8px rgba(244, 67, 54, 0.2);
+}
+
+.murder-board-item-form .btn-danger:hover,
+.murder-board-application .btn-danger:hover,
+.murder-board-dialog .btn-danger:hover,
+.board-settings-content .btn-danger:hover,
+.color-picker-content .btn-danger:hover {
+  box-shadow: 0 6px 16px rgba(244, 67, 54, 0.3);
+  background: #d32f2f;
+}
+
+.murder-board-item-form .btn-danger:active,
+.murder-board-application .btn-danger:active,
+.murder-board-dialog .btn-danger:active,
+.board-settings-content .btn-danger:active,
+.color-picker-content .btn-danger:active {
+  box-shadow: 0 2px 4px rgba(244, 67, 54, 0.2);
+}
+
+.murder-board-item-form .btn-ghost,
+.murder-board-application .btn-ghost,
+.murder-board-dialog .btn-ghost,
+.board-settings-content .btn-ghost,
+.color-picker-content .btn-ghost {
+  background: transparent;
+  border: 2px solid var(--mb-dialog-input-border);
+  color: var(--mb-text);
+  box-shadow: none;
+}
+
+.murder-board-item-form .btn-ghost:hover,
+.murder-board-application .btn-ghost:hover,
+.murder-board-dialog .btn-ghost:hover,
+.board-settings-content .btn-ghost:hover,
+.color-picker-content .btn-ghost:hover {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: var(--mb-secondary);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+}
+
+.murder-board-item-form .btn-ghost:active,
+.murder-board-application .btn-ghost:active,
+.murder-board-dialog .btn-ghost:active,
+.board-settings-content .btn-ghost:active,
+.color-picker-content .btn-ghost:active {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+body.theme-dark .murder-board-item-form .btn-ghost,
+body.theme-dark .murder-board-application .btn-ghost,
+body.theme-dark .murder-board-dialog .btn-ghost,
+body.theme-dark .board-settings-content .btn-ghost,
+body.theme-dark .color-picker-content .btn-ghost,
+html.dark-mode .murder-board-item-form .btn-ghost,
+html.dark-mode .murder-board-application .btn-ghost,
+html.dark-mode .murder-board-dialog .btn-ghost,
+html.dark-mode .board-settings-content .btn-ghost,
+html.dark-mode .color-picker-content .btn-ghost {
+  background: transparent;
+  border-color: var(--mb-border);
+}
+
+body.theme-dark .murder-board-item-form .btn-ghost:hover,
+body.theme-dark .murder-board-application .btn-ghost:hover,
+body.theme-dark .murder-board-dialog .btn-ghost:hover,
+body.theme-dark .board-settings-content .btn-ghost:hover,
+body.theme-dark .color-picker-content .btn-ghost:hover,
+html.dark-mode .murder-board-item-form .btn-ghost:hover,
+html.dark-mode .murder-board-application .btn-ghost:hover,
+html.dark-mode .murder-board-dialog .btn-ghost:hover,
+html.dark-mode .board-settings-content .btn-ghost:hover,
+html.dark-mode .color-picker-content .btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--mb-secondary);
+}
+
+.murder-board-item-form .btn-icon,
+.murder-board-application .btn-icon,
+.murder-board-dialog .btn-icon,
+.board-settings-content .btn-icon,
+.color-picker-content .btn-icon {
+  padding: 8px 10px;
+  background: var(--mb-light);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  gap: 0;
+}
+
+.murder-board-item-form .btn-icon:hover,
+.murder-board-application .btn-icon:hover,
+.murder-board-dialog .btn-icon:hover,
+.board-settings-content .btn-icon:hover,
+.color-picker-content .btn-icon:hover {
+  background: var(--mb-border);
+}
+
+.murder-board-item-form .btn-icon i,
+.murder-board-application .btn-icon i,
+.murder-board-dialog .btn-icon i,
+.board-settings-content .btn-icon i,
+.color-picker-content .btn-icon i {
+  min-width: auto;
+}
+
+.murder-board-item-form .btn-link,
+.murder-board-application .btn-link,
+.murder-board-dialog .btn-link,
+.board-settings-content .btn-link,
+.color-picker-content .btn-link {
+  background: transparent;
+  color: var(--mb-secondary);
+  box-shadow: none;
+  padding: 0;
+  gap: 4px;
+}
+
+.murder-board-item-form .btn-link:hover,
+.murder-board-application .btn-link:hover,
+.murder-board-dialog .btn-link:hover,
+.board-settings-content .btn-link:hover,
+.color-picker-content .btn-link:hover {
+  background: transparent;
+  color: var(--mb-secondary-dark);
+  transform: none;
+  text-decoration: underline;
+}
+
+.murder-board-item-form .btn-link:active,
+.murder-board-application .btn-link:active,
+.murder-board-dialog .btn-link:active,
+.board-settings-content .btn-link:active,
+.color-picker-content .btn-link:active {
+  color: var(--mb-secondary-dark);
+}
+
+/* ===== Button Groups ===== */
+
+.murder-board-item-form .btn-group,
+.murder-board-application .btn-group,
+.murder-board-dialog .btn-group,
+.board-settings-content .btn-group,
+.color-picker-content .btn-group,
+.murder-board-item-form .button-group,
+.murder-board-application .button-group,
+.murder-board-dialog .button-group,
+.board-settings-content .button-group,
+.color-picker-content .button-group {
+  display: flex;
+  gap: var(--mb-spacing-md);
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: var(--mb-spacing-3xl);
+  padding-top: var(--mb-spacing-2xl);
+  border-top: 1px solid var(--mb-dialog-input-border);
+}
+
+.murder-board-item-form .btn-group.horizontal,
+.murder-board-application .btn-group.horizontal,
+.murder-board-dialog .btn-group.horizontal,
+.board-settings-content .btn-group.horizontal,
+.color-picker-content .btn-group.horizontal,
+.murder-board-item-form .button-group.horizontal,
+.murder-board-application .button-group.horizontal,
+.murder-board-dialog .button-group.horizontal,
+.board-settings-content .button-group.horizontal,
+.color-picker-content .button-group.horizontal {
+  flex-direction: row;
+  gap: var(--mb-spacing-md);
+}
+
+.murder-board-item-form .btn-group.vertical,
+.murder-board-application .btn-group.vertical,
+.murder-board-dialog .btn-group.vertical,
+.board-settings-content .btn-group.vertical,
+.color-picker-content .btn-group.vertical,
+.murder-board-item-form .button-group.vertical,
+.murder-board-application .button-group.vertical,
+.murder-board-dialog .button-group.vertical,
+.board-settings-content .button-group.vertical,
+.color-picker-content .button-group.vertical {
+  flex-direction: column;
+}
+
+.murder-board-item-form .btn-group.centered,
+.murder-board-application .btn-group.centered,
+.murder-board-dialog .btn-group.centered,
+.board-settings-content .btn-group.centered,
+.color-picker-content .btn-group.centered,
+.murder-board-item-form .button-group.centered,
+.murder-board-application .button-group.centered,
+.murder-board-dialog .button-group.centered,
+.board-settings-content .button-group.centered,
+.color-picker-content .button-group.centered {
+  justify-content: center;
+}
+
+.murder-board-item-form .btn-group.left,
+.murder-board-application .btn-group.left,
+.murder-board-dialog .btn-group.left,
+.board-settings-content .btn-group.left,
+.color-picker-content .btn-group.left,
+.murder-board-item-form .button-group.left,
+.murder-board-application .button-group.left,
+.murder-board-dialog .button-group.left,
+.board-settings-content .button-group.left,
+.color-picker-content .button-group.left {
+  justify-content: flex-start;
+}
+
+/* ===== Full Width Button ===== */
+
+.murder-board-item-form .btn-block,
+.murder-board-application .btn-block,
+.murder-board-dialog .btn-block,
+.board-settings-content .btn-block,
+.color-picker-content .btn-block,
+.murder-board-item-form .btn-full,
+.murder-board-application .btn-full,
+.murder-board-dialog .btn-full,
+.board-settings-content .btn-full,
+.color-picker-content .btn-full {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ===== Button States ===== */
+
+.murder-board-item-form .btn:hover:disabled,
+.murder-board-application .btn:hover:disabled,
+.murder-board-dialog .btn:hover:disabled,
+.board-settings-content .btn:hover:disabled,
+.color-picker-content .btn:hover:disabled,
+.murder-board-item-form .btn:active:disabled,
+.murder-board-application .btn:active:disabled,
+.murder-board-dialog .btn:active:disabled,
+.board-settings-content .btn:active:disabled,
+.color-picker-content .btn:active:disabled {
+  opacity: 0.5;
+  transform: none;
+  box-shadow: var(--mb-shadow-sm);
+  cursor: not-allowed;
+}
+
+/* Loading state */
+.murder-board-item-form .btn.loading,
+.murder-board-application .btn.loading,
+.murder-board-dialog .btn.loading,
+.board-settings-content .btn.loading,
+.color-picker-content .btn.loading {
+  position: relative;
+  color: transparent;
+  pointer-events: none;
+}
+
+.murder-board-item-form .btn.loading::after,
+.murder-board-application .btn.loading::after,
+.murder-board-dialog .btn.loading::after,
+.board-settings-content .btn.loading::after,
+.color-picker-content .btn.loading::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  top: 50%;
+  left: 50%;
+  margin-left: -8px;
+  margin-top: -8px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 50%;
+  border-top-color: white;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ===== Dialog Buttons ===== */
+
+.dialog-buttons {
+  display: flex;
+  gap: var(--mb-spacing-md);
+  justify-content: flex-end;
+  align-items: center;
+  margin-top: var(--mb-spacing-3xl);
+  padding-top: var(--mb-spacing-2xl);
+  border-top: 1px solid var(--mb-dialog-input-border);
+}
+
+.board-settings-content .dialog-buttons .btn:first-child,
+.color-picker-content .dialog-buttons .btn:first-child,
+.murder-board-dialog .dialog-buttons .btn:first-child {
+  margin-right: auto;
+}
+
+/* ===== Settings Buttons ===== */
+
+.board-settings-buttons,
+.settings-buttons {
+  display: flex;
+  gap: var(--mb-spacing-md);
+  flex-wrap: wrap;
+  margin-top: var(--mb-spacing-3xl);
+  padding-top: var(--mb-spacing-2xl);
+  border-top: 1px solid var(--mb-dialog-input-border);
+}
+
+.board-settings-content .settings-btn,
+.settings-buttons .settings-btn {
+  padding: var(--mb-spacing-md) var(--mb-spacing-xl);
+  border: 2px solid var(--mb-dialog-input-border);
+  background: var(--mb-light);
+  color: var(--mb-text);
+  border-radius: var(--mb-radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+  transition: var(--mb-transition-normal);
+  display: flex;
+  align-items: center;
+  gap: var(--mb-spacing-sm);
+  flex: 1;
+  justify-content: center;
+}
+
+.board-settings-content .settings-btn:hover,
+.settings-buttons .settings-btn:hover {
+  border-color: var(--mb-secondary);
+  background: rgba(33, 150, 243, 0.05);
+  transform: translateY(-2px);
+}
+
+.board-settings-content .export-btn,
+.settings-buttons .export-btn {
+  border-color: var(--mb-primary);
+  color: var(--mb-primary);
+}
+
+.board-settings-content .export-btn:hover,
+.settings-buttons .export-btn:hover {
+  background: rgba(76, 175, 80, 0.05);
+}
+
+.board-settings-content .import-btn,
+.settings-buttons .import-btn {
+  border-color: var(--mb-secondary);
+  color: var(--mb-secondary);
+}
+
+.board-settings-content .import-btn:hover,
+.settings-buttons .import-btn:hover {
+  background: rgba(33, 150, 243, 0.05);
+}
+
+.board-settings-content .save-btn,
+.settings-buttons .save-btn {
+  background: var(--mb-primary);
+  color: white;
+  border: none;
+}
+
+.board-settings-content .save-btn:hover,
+.settings-buttons .save-btn:hover {
+  background: var(--mb-primary-dark);
+}
+
+.board-settings-content .delete-btn,
+.settings-buttons .delete-btn {
+  border-color: var(--mb-danger);
+  color: var(--mb-danger);
+}
+
+.board-settings-content .delete-btn:hover,
+.settings-buttons .delete-btn:hover {
+  background: rgba(244, 67, 54, 0.05);
+}
+
+/* ===== Clear Button ===== */
+
+.board-settings-content .clear-btn,
+.settings-buttons .clear-btn,
+.color-picker-content .clear-btn,
+.murder-board-dialog .clear-btn {
+  padding: var(--mb-spacing-md) var(--mb-spacing-lg);
+  background: transparent;
+  border: 2px solid var(--mb-dialog-input-border);
+  color: var(--mb-text);
+  border-radius: var(--mb-radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+  transition: var(--mb-transition-normal);
+}
+
+.board-settings-content .clear-btn:hover,
+.settings-buttons .clear-btn:hover,
+.color-picker-content .clear-btn:hover,
+.murder-board-dialog .clear-btn:hover {
+  border-color: var(--mb-danger);
+  color: var(--mb-danger);
+  background: rgba(244, 67, 54, 0.05);
+}
+
+/* ===== Color Picker Buttons ===== */
+
+.color-picker-content .color-picker-btn {
+  padding: var(--mb-spacing-md) var(--mb-spacing-xl);
+  border: 2px solid var(--mb-dialog-input-border);
+  background: var(--mb-light);
+  color: var(--mb-text);
+  border-radius: var(--mb-radius-sm);
+  cursor: pointer;
+  font-weight: 600;
+  transition: var(--mb-transition-normal);
+  display: flex;
+  align-items: center;
+  gap: var(--mb-spacing-sm);
+}
+
+.color-picker-content .color-picker-btn:hover {
+  border-color: var(--mb-secondary);
+  background: rgba(33, 150, 243, 0.05);
+  transform: translateY(-2px);
+}
+
+.color-picker-content .color-picker-btn.save-btn {
+  background: var(--mb-primary);
+  color: white;
+  border: none;
+}
+
+.color-picker-content .color-picker-btn.save-btn:hover {
+  background: var(--mb-primary-dark);
+}
+
+.color-picker-content .color-picker-btn.cancel-btn {
+  background: var(--mb-light);
+  color: var(--mb-text);
+  border: 2px solid var(--mb-dialog-input-border);
+}
+
+.color-picker-content .color-picker-btn.cancel-btn:hover {
+  background: rgba(33, 150, 243, 0.05);
+  border-color: var(--mb-secondary);
+}

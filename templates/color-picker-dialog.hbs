@@ -1,0 +1,21 @@
+<div class="color-picker-content">
+  <div class="color-picker-group">
+    {{> color-picker 
+      name="connectionColor"
+      colors=connectionColors
+      currentColor=currentColor
+      label="Select Connection Color"
+    }}
+  </div>
+
+  <div class="color-picker-buttons">
+    <button class="color-picker-btn save-btn" data-action="save">
+      <i class="fas fa-check"></i>
+      Save
+    </button>
+    <button class="color-picker-btn cancel-btn" data-action="cancel">
+      <i class="fas fa-times"></i>
+      Cancel
+    </button>
+  </div>
+</div>

@@ -1,0 +1,298 @@
+/**
+ * Murder Board - Toolbar Organization & Spacing
+ * Improved layout and visual hierarchy for the main toolbar
+ */
+
+/* ===== Toolbar Container ===== */
+
+.murder-board-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--mb-spacing-2xl);
+  padding: var(--mb-spacing-lg) var(--mb-spacing-2xl);
+  background: var(--mb-toolbar-bg);
+  border-bottom: 2px solid var(--mb-toolbar-border);
+  flex-wrap: wrap;
+  min-height: 56px;
+}
+
+/* ===== Toolbar Sections ===== */
+
+.murder-board-toolbar-section {
+  display: flex;
+  align-items: center;
+  gap: var(--mb-spacing-md);
+  flex: 0 1 auto;
+  flex-wrap: wrap;
+}
+
+.murder-board-toolbar-section-right {
+  margin-left: auto;
+}
+
+/* ===== Section Dividers (Visual Grouping) ===== */
+
+.murder-board-toolbar-section::before {
+  content: '';
+  width: 1px;
+  height: 24px;
+  background: var(--mb-border);
+  opacity: 0.3;
+  margin-right: var(--mb-spacing-sm);
+  display: none;
+}
+
+.murder-board-toolbar-section:first-child::before {
+  display: none;
+}
+
+/* Only show dividers on larger screens */
+@media (min-width: 768px) {
+  .murder-board-toolbar-section:not(:first-child)::before {
+    display: block;
+  }
+}
+
+/* ===== Mode Indicator ===== */
+
+.murder-board-mode-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--mb-spacing-sm);
+  padding: var(--mb-spacing-sm) var(--mb-spacing-lg);
+  background: rgba(33, 150, 243, 0.1);
+  border: 1px solid rgba(33, 150, 243, 0.2);
+  border-radius: var(--mb-radius-md);
+  font-size: var(--mb-font-sm);
+  font-weight: 600;
+  color: var(--mb-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.murder-board-mode-indicator::before {
+  content: '';
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mb-secondary);
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.2);
+  }
+}
+
+body.theme-dark .murder-board-mode-indicator,
+html.dark-mode .murder-board-mode-indicator {
+  background: rgba(66, 165, 245, 0.15);
+  border-color: rgba(66, 165, 245, 0.3);
+  color: #42A5F5;
+}
+
+body.theme-dark .murder-board-mode-indicator::before,
+html.dark-mode .murder-board-mode-indicator::before {
+  background: #42A5F5;
+}
+
+/* ===== Board Selector Group ===== */
+
+.murder-board-board-selector-group {
+  display: flex;
+  align-items: center;
+  gap: var(--mb-spacing-md);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* ===== Board Selector Wrapper ===== */
+
+.murder-board-board-selector-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 150px;
+  max-width: 350px;
+  background: var(--mb-light);
+  border: 2px solid var(--mb-border);
+  border-radius: var(--mb-radius-sm);
+  transition: var(--mb-transition-normal);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.murder-board-board-selector-wrapper:hover {
+  border-color: var(--mb-primary);
+  background: rgba(76, 175, 80, 0.05);
+  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.15);
+}
+
+.murder-board-board-selector-wrapper:focus-within {
+  border-color: var(--mb-secondary);
+  box-shadow: 0 0 0 3px var(--mb-focus-shadow), 0 2px 4px rgba(33, 150, 243, 0.15);
+}
+
+.murder-board-board-selector-wrapper select {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  z-index: 2;
+  cursor: pointer;
+  margin: 0;
+  padding: 0;
+}
+
+.murder-board-board-selector-wrapper .board-selector-display {
+  flex: 1;
+  padding: var(--mb-spacing-md) var(--mb-spacing-lg);
+  font-size: var(--mb-font-base);
+  font-weight: 500;
+  color: var(--mb-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.murder-board-board-selector-wrapper i {
+  flex-shrink: 0;
+  padding-right: var(--mb-spacing-md);
+  color: var(--mb-secondary);
+  font-size: 12px;
+  transition: var(--mb-transition-fast);
+}
+
+.murder-board-board-selector-wrapper:hover i {
+  color: var(--mb-primary);
+}
+
+/* ===== Responsive Toolbar ===== */
+
+@media (max-width: 1200px) {
+  .murder-board-toolbar {
+    gap: var(--mb-spacing-lg);
+  }
+
+  .murder-board-board-selector-wrapper {
+    max-width: 250px;
+  }
+}
+
+@media (max-width: 768px) {
+  .murder-board-toolbar {
+    gap: var(--mb-spacing-md);
+    padding: var(--mb-spacing-md) var(--mb-spacing-lg);
+  }
+
+  .murder-board-toolbar-section {
+    flex: 1 1 calc(50% - var(--mb-spacing-md)/2);
+    min-width: auto;
+    gap: var(--mb-spacing-sm);
+  }
+
+  .murder-board-toolbar-section::before {
+    display: none !important;
+  }
+
+  .murder-board-toolbar-section-right {
+    margin-left: 0;
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+
+  .murder-board-board-selector-wrapper {
+    max-width: none;
+    flex: 1;
+    min-width: 120px;
+  }
+
+  .murder-board-mode-indicator {
+    padding: var(--mb-spacing-xs) var(--mb-spacing-md);
+    font-size: var(--mb-font-xs);
+    gap: 4px;
+  }
+
+  .murder-board-mode-indicator::before {
+    width: 6px;
+    height: 6px;
+  }
+}
+
+/* ===== Button Spacing in Toolbar ===== */
+
+.murder-board-toolbar .murder-board-btn {
+  white-space: nowrap;
+}
+
+.murder-board-toolbar .murder-board-btn span {
+  display: inline;
+}
+
+/* Hide button text on very small screens */
+@media (max-width: 640px) {
+  .murder-board-toolbar .murder-board-btn span {
+    display: none;
+  }
+
+  .murder-board-toolbar .murder-board-btn {
+    padding: var(--mb-spacing-sm) var(--mb-spacing-md);
+  }
+}
+
+/* ===== Canvas Wrapper ===== */
+
+.murder-board-canvas-wrapper {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  height: calc(100% - 80px);
+  overflow: hidden;
+  background: linear-gradient(135deg, rgba(245, 245, 245, 0.5) 0%, rgba(255, 251, 240, 0.5) 100%);
+  border-radius: 0;
+}
+
+.murder-board-canvas-wrapper canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: white;
+}
+
+body.theme-dark .murder-board-canvas-wrapper,
+html.dark-mode .murder-board-canvas-wrapper {
+  background: linear-gradient(135deg, rgba(50, 50, 50, 0.5) 0%, rgba(45, 45, 45, 0.5) 100%);
+}
+
+body.theme-dark .murder-board-canvas-wrapper canvas,
+html.dark-mode .murder-board-canvas-wrapper canvas {
+  background: #2a2a2a;
+}
+
+/* ===== Toolbar Container (Main App) ===== */
+
+.murder-board-container {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+.murder-board-container > .murder-board-toolbar {
+  flex-shrink: 0;
+  order: 1;
+}
+
+.murder-board-container > .murder-board-canvas-wrapper {
+  flex: 1;
+  order: 2;
+}

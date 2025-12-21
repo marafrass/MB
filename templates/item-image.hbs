@@ -1,0 +1,50 @@
+<form class="murder-board-item-form">
+  <div class="form-group">
+    <label>Select Image</label>
+    <div class="file-input-wrapper" style="display: flex; flex-direction: column; gap: 8px;">
+      {{#file-picker type="image" buttonClass="murder-board-btn"}}{{/file-picker}}
+      <input type="text" name="imageUrl" value="{{data.imageUrl}}" placeholder="Path to image..." style="width: 100%;">
+    </div>
+  </div>
+
+  {{> radio-group 
+    name="preset"
+    options=imageSizeOptions
+    currentValue=data.preset
+    variant="icons"
+    label="Image Size"
+  }}
+
+  {{> radio-group 
+    name="borderColor"
+    options=borderOptions
+    currentValue=data.borderColor
+    variant="colors"
+    label="Border Color"
+  }}
+
+  {{> radio-group 
+    name="fastenerType"
+    options=fastenerOptions
+    currentValue=data.fastenerType
+    variant="icons"
+    label="Fastener Type"
+  }}
+
+  <div class="form-group">
+    <label class="checkbox-label">
+      <input type="checkbox" name="acceptsConnections" value="on" {{#if acceptsConnections}}checked{{/if}}>
+      <span>Accepts Connections</span>
+    </label>
+  </div>
+
+  <input type="hidden" name="x" value="{{x}}">
+  <input type="hidden" name="y" value="{{y}}">
+
+  {{> dialog-buttons 
+    submitLabel=(localize 'MURDER_BOARD.UI.Save')
+    submitIcon="fa-save"
+    cancelLabel=(localize 'MURDER_BOARD.UI.Cancel')
+    cancelIcon="fa-times"
+  }}
+</form>

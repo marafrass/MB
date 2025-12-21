@@ -1,0 +1,282 @@
+/**
+ * Murder Board - Color System & Color Picker Components
+ * Centralized color palette and reusable color picker styles
+ */
+
+/* ===== Color Palette & Semantic Mapping ===== */
+
+:root {
+  /* Core brand colors - Already defined in main file but referenced here for clarity */
+  --mb-color-primary: #4CAF50;
+  --mb-color-secondary: #2196F3;
+  --mb-color-accent: #FF9800;
+  --mb-color-accent-alt: #9C27B0;
+  --mb-color-danger: #f44336;
+
+  /* Post-it Note Colors */
+  --mb-posit-yellow: #FFFF99;
+  --mb-posit-pink: #FFB6C1;
+  --mb-posit-green: #90EE90;
+  --mb-posit-blue: #ADD8E6;
+  --mb-posit-orange: #FFDAB9;
+
+  /* Text Colors */
+  --mb-text-black: #000000;
+  --mb-text-white: #FFFFFF;
+  --mb-text-red: #CC0000;
+  --mb-text-blue: #0066CC;
+  --mb-text-green: #006600;
+
+  /* Connection Line Colors */
+  --mb-line-red: #FF0000;
+  --mb-line-green: #00AA00;
+  --mb-line-blue: #0066FF;
+  --mb-line-yellow: #FFFF00;
+  --mb-line-orange: #FFA500;
+  --mb-line-purple: #9933FF;
+  --mb-line-black: #000000;
+  --mb-line-white: #FFFFFF;
+
+  /* Border Colors */
+  --mb-border-white: #FFFFFF;
+  --mb-border-black: #000000;
+  --mb-border-none: transparent;
+
+  /* Color groups for structured access */
+  --mb-swatch-size: 48px;
+  --mb-swatch-border-radius: 6px;
+  --mb-swatch-gap: var(--mb-spacing-md);
+  --mb-color-transition: all 0.2s ease;
+  --mb-color-scale-hover: 1.1;
+  --mb-color-scale-checked: 1.05;
+}
+
+/* Dark mode color adjustments */
+body.theme-dark,
+html.dark-mode {
+  --mb-color-primary: #66BB6A;
+  --mb-color-secondary: #42A5F5;
+  --mb-color-accent: #FFA726;
+  --mb-color-accent-alt: #CE93D8;
+}
+
+/* ===== Generic Color Swatches Component ===== */
+
+.color-swatches {
+  display: flex;
+  gap: var(--mb-swatch-gap);
+  flex-wrap: wrap;
+  margin-top: var(--mb-spacing-sm);
+}
+
+.color-swatches input[type="radio"] {
+  display: none;
+}
+
+.color-swatches .swatch {
+  display: inline-block;
+  width: var(--mb-swatch-size);
+  height: var(--mb-swatch-size);
+  border-radius: var(--mb-swatch-border-radius);
+  cursor: pointer;
+  border: 3px solid transparent;
+  transition: var(--mb-color-transition);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.color-swatches .swatch:hover {
+  transform: scale(var(--mb-color-scale-hover));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.color-swatches input[type="radio"]:checked + .swatch {
+  border-color: var(--mb-secondary);
+  box-shadow: 0 0 0 3px var(--mb-focus-shadow), 0 2px 6px rgba(0, 0, 0, 0.15);
+  transform: scale(var(--mb-color-scale-checked));
+}
+
+/* ===== Color Picker Dialog ===== */
+
+.murder-board-color-picker-dialog {
+  padding: var(--mb-spacing-2xl);
+  min-width: 400px;
+}
+
+.color-picker-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mb-spacing-3xl);
+}
+
+.color-picker-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mb-spacing-md);
+}
+
+.color-picker-label {
+  font-weight: 700;
+  font-size: var(--mb-font-md);
+  color: var(--mb-dialog-label-color);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.connection-color-swatches {
+  display: flex;
+  gap: var(--mb-swatch-gap);
+  flex-wrap: wrap;
+  padding: var(--mb-spacing-md) 0;
+}
+
+.connection-color-swatches input[type="radio"] {
+  display: none;
+}
+
+.connection-color-swatches .swatch {
+  display: inline-block;
+  width: var(--mb-swatch-size);
+  height: var(--mb-swatch-size);
+  border-radius: var(--mb-swatch-border-radius);
+  cursor: pointer;
+  border: 3px solid transparent;
+  transition: var(--mb-color-transition);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.connection-color-swatches .swatch:hover {
+  transform: scale(var(--mb-color-scale-hover));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.connection-color-swatches input[type="radio"]:checked + .swatch {
+  border-color: var(--mb-secondary);
+  box-shadow: 0 0 0 3px var(--mb-focus-shadow), 0 2px 6px rgba(0, 0, 0, 0.15);
+  transform: scale(var(--mb-color-scale-checked));
+}
+
+/* ===== Color Swatch Group (Structured) ===== */
+
+.color-swatch-group {
+  display: flex;
+  gap: var(--mb-spacing-md);
+  flex-wrap: wrap;
+  margin-top: var(--mb-spacing-md);
+}
+
+.color-swatch-input {
+  display: none;
+}
+
+.color-swatch-label {
+  display: inline-block;
+  width: var(--mb-swatch-size);
+  height: var(--mb-swatch-size);
+  border-radius: var(--mb-swatch-border-radius);
+  cursor: pointer;
+  border: 3px solid transparent;
+  transition: var(--mb-color-transition);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+.color-swatch-label:hover {
+  transform: scale(var(--mb-color-scale-hover));
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.color-swatch-input:checked + .color-swatch-label {
+  border-color: var(--mb-secondary);
+  box-shadow: 0 0 0 3px var(--mb-focus-shadow), 0 2px 6px rgba(0, 0, 0, 0.15);
+  transform: scale(var(--mb-color-scale-checked));
+}
+
+/* ===== Color Indicator in Settings ===== */
+
+.murder-board-color-picker-dialog .color-picker-buttons {
+  display: flex;
+  gap: var(--mb-spacing-md);
+  justify-content: flex-end;
+  margin-top: var(--mb-spacing-2xl);
+}
+
+.color-picker-btn {
+  padding: var(--mb-spacing-md) var(--mb-spacing-xl);
+  border: none;
+  border-radius: var(--mb-radius-sm);
+  font-size: var(--mb-font-md);
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--mb-transition-normal);
+  display: flex;
+  align-items: center;
+  gap: var(--mb-spacing-sm);
+  user-select: none;
+  outline: none;
+}
+
+.color-picker-btn.save-btn {
+  background: var(--mb-primary);
+  color: white;
+  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.2);
+}
+
+.color-picker-btn.save-btn:hover {
+  background: var(--mb-primary-dark);
+  box-shadow: 0 6px 16px rgba(76, 175, 80, 0.3);
+  transform: translateY(-2px);
+}
+
+.color-picker-btn.cancel-btn {
+  background: var(--mb-light);
+  color: var(--mb-text);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.color-picker-btn.cancel-btn:hover {
+  background: var(--mb-border);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+/* ===== Custom Color Picker Input ===== */
+
+.color-picker-inline {
+  display: flex;
+  gap: var(--mb-spacing-md);
+  align-items: center;
+  margin-top: var(--mb-spacing-sm);
+  flex-wrap: nowrap;
+}
+
+.color-picker-input {
+  width: 60px;
+  height: 40px;
+  border: 2px solid var(--mb-border);
+  border-radius: var(--mb-border-radius);
+  cursor: pointer;
+  transition: var(--mb-color-transition);
+  flex-shrink: 0;
+}
+
+.color-picker-input:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border-color: var(--mb-primary);
+}
+
+.color-picker-input:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--mb-focus-shadow);
+  border-color: var(--mb-primary);
+}
+
+.color-picker-inline .color-swatches {
+  margin: 0;
+  flex-wrap: nowrap;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.color-picker-inline .swatch {
+  width: 32px;
+  height: 32px;
+}

@@ -1,0 +1,248 @@
+/**
+ * Murder Board - Radio Group Components
+ * Standardized radio button patterns for consistent UI across all dialogs
+ * ALL SELECTORS SCOPED TO .murder-board NAMESPACE
+ */
+
+/* ===== Generic Radio Group Container ===== */
+
+.murder-board .radio-group {
+  display: flex;
+  gap: 12px;
+  flex-wrap: nowrap;
+  margin-top: var(--mb-spacing-md);
+  align-items: flex-start;
+}
+
+.murder-board .radio-group input[type="radio"] {
+  display: none;
+}
+
+/* ===== Radio Label Base ===== */
+
+.murder-board .radio-group .radio-label {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: var(--mb-spacing-md) var(--mb-spacing-lg);
+  border: 2px solid var(--mb-dialog-input-border);
+  border-radius: var(--mb-radius-md);
+  background: var(--mb-dialog-input-bg);
+  cursor: pointer;
+  transition: var(--mb-transition-normal);
+  font-size: var(--mb-font-base);
+  font-weight: 500;
+  color: var(--mb-text);
+  user-select: none;
+  min-width: fit-content;
+}
+
+.murder-board .radio-group .radio-label:hover {
+  border-color: var(--mb-secondary);
+  background: rgba(33, 150, 243, 0.05);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.murder-board .radio-group input[type="radio"]:checked + .radio-label {
+  border-color: var(--mb-secondary);
+  background: rgba(33, 150, 243, 0.1);
+  box-shadow: 0 0 0 3px var(--mb-focus-shadow);
+  transform: translateY(-2px);
+  font-weight: 600;
+}
+
+.murder-board .radio-group input[type="radio"]:focus + .radio-label {
+  outline: 2px solid var(--mb-secondary);
+  outline-offset: 2px;
+}
+
+/* ===== Radio Icon Variant ===== */
+
+.murder-board .radio-group-icons {
+  justify-content: flex-start;
+}
+
+.murder-board .radio-group-icons .radio-label {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.murder-board .radio-group-icons .radio-label i {
+  font-size: 20px;
+  color: var(--mb-secondary);
+  min-width: 24px;
+  text-align: center;
+}
+
+.murder-board .radio-group-icons input[type="radio"]:checked + .radio-label i {
+  font-size: 22px;
+}
+
+/* ===== Radio Color Variant ===== */
+
+.murder-board .radio-group-colors {
+  justify-content: flex-start;
+  gap: 20px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.murder-board .radio-group-colors .radio-label {
+  flex-direction: row;
+  gap: 10px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  align-items: center;
+  min-width: fit-content;
+}
+
+.murder-board .radio-group-colors .radio-label:hover {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  transform: none;
+}
+
+.murder-board .radio-group-colors .radio-label .radio-color {
+  width: 48px;
+  height: 48px;
+  border: 3px solid transparent;
+  border-radius: var(--mb-radius-md);
+  padding: 0;
+  margin: 0;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+  transition: var(--mb-transition-normal);
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+.murder-board .radio-group-colors .radio-label:hover .radio-color {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+}
+
+.murder-board .radio-group-colors input[type="radio"]:checked + .radio-label .radio-color {
+  border-color: var(--mb-secondary);
+  box-shadow: 0 0 0 3px var(--mb-focus-shadow), 0 2px 6px rgba(0, 0, 0, 0.15);
+  transform: scale(1.05);
+}
+
+.murder-board .radio-group-colors .color-label {
+  font-size: var(--mb-font-base);
+  font-weight: 500;
+  color: var(--mb-text);
+  white-space: nowrap;
+}
+
+.murder-board .radio-group-colors input[type="radio"]:checked + .radio-label .color-label {
+  font-weight: 600;
+}
+
+/* ===== Radio Fasteners Variant ===== */
+
+.murder-board .radio-group-fasteners {
+  justify-content: flex-start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.murder-board .radio-group-fasteners .radio-label {
+  min-width: 100px;
+  text-align: center;
+}
+
+.murder-board .radio-group-fasteners .radio-label i {
+  font-size: 20px;
+  color: var(--mb-secondary);
+}
+
+/* ===== Radio Layout Variations ===== */
+
+/* Stacked vertical layout */
+.murder-board .radio-group.vertical {
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.murder-board .radio-group.vertical .radio-label {
+  width: 100%;
+  text-align: left;
+  flex-direction: row;
+  gap: 12px;
+}
+
+.murder-board .radio-group.vertical .radio-label i {
+  flex-shrink: 0;
+  text-align: center;
+  min-width: 24px;
+}
+
+/* Equal width items */
+.murder-board .radio-group.equal-width {
+  justify-content: space-between;
+}
+
+.murder-board .radio-group.equal-width .radio-label {
+  flex: 1;
+  text-align: center;
+}
+
+/* Compact layout */
+.murder-board .radio-group.compact {
+  gap: 6px;
+}
+
+.murder-board .radio-group.compact .radio-label {
+  padding: 8px 12px;
+  font-size: var(--mb-font-sm);
+  gap: 6px;
+}
+
+.murder-board .radio-group.compact .radio-label i {
+  font-size: 16px;
+}
+
+/* Large layout */
+.murder-board .radio-group.large {
+  gap: 16px;
+}
+
+.murder-board .radio-group.large .radio-label {
+  padding: 16px 20px;
+  font-size: var(--mb-font-lg);
+  gap: 12px;
+  min-width: 120px;
+}
+
+.murder-board .radio-group.large .radio-label i {
+  font-size: 28px;
+}
+
+/* ===== Accessibility & States ===== */
+
+.murder-board .radio-group input[type="radio"]:disabled + .radio-label {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.murder-board .radio-group input[type="radio"]:disabled + .radio-label:hover {
+  border-color: var(--mb-dialog-input-border);
+  background: var(--mb-dialog-input-bg);
+  transform: none;
+  box-shadow: none;
+};
+  background: rgba(33, 150, 243, 0.05);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.murder-board-settings-dialog .radio-group input[type="radio"]:checked + .radio-label {
+  border-color: var(--mb-secondary);
+  background: rgba(33, 150, 243, 0.1);
+  box-shadow: 0 0 0 3px var(--mb-focus-shadow);
+  transform: translateY(-2px);
+}

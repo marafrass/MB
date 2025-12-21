@@ -1,0 +1,325 @@
+/**
+ * Murder Board - Form Groups & Input Styling
+ * Standardized form elements with consistent spacing and behavior
+ * ALL SELECTORS SCOPED TO .murder-board NAMESPACE
+ */
+
+/* ===== Generic Form Group Container ===== */
+
+.murder-board .form-group {
+  margin-bottom: var(--mb-spacing-3xl);
+  display: flex;
+  flex-direction: column;
+  gap: var(--mb-spacing-sm);
+}
+
+.murder-board .form-group:last-child {
+  margin-bottom: 0;
+}
+
+/* ===== Form Labels ===== */
+
+.murder-board .form-label,
+.murder-board .form-group label {
+  display: block;
+  margin-bottom: var(--mb-spacing-xs);
+  font-weight: 700;
+  font-size: var(--mb-font-md);
+  color: var(--mb-dialog-label-color);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  line-height: 1.2;
+}
+
+.murder-board .form-label.optional,
+.murder-board .form-group label.optional {
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  font-size: var(--mb-font-base);
+}
+
+/* ===== Text Inputs & Textareas ===== */
+
+.murder-board .form-input,
+.murder-board .form-group input[type="text"],
+.murder-board .form-group input[type="email"],
+.murder-board .form-group input[type="url"],
+.murder-board .form-group input[type="number"],
+.murder-board .form-group textarea,
+.murder-board .form-group select {
+  width: 100%;
+  padding: var(--mb-spacing-md) var(--mb-spacing-lg);
+  border: 2px solid var(--mb-dialog-input-border);
+  border-radius: var(--mb-radius-sm);
+  font-size: 14px;
+  box-sizing: border-box;
+  font-family: inherit;
+  transition: var(--mb-transition-all-normal);
+  background-color: var(--mb-dialog-input-bg);
+  color: var(--mb-text);
+  line-height: 1.5;
+}
+
+.murder-board .form-input:focus,
+.murder-board .form-group input[type="text"]:focus,
+.murder-board .form-group input[type="email"]:focus,
+.murder-board .form-group input[type="url"]:focus,
+.murder-board .form-group input[type="number"]:focus,
+.murder-board .form-group textarea:focus,
+.murder-board .form-group select:focus {
+  outline: none;
+  border-color: var(--mb-secondary);
+  box-shadow: var(--mb-shadow-focus);
+  transform: translateY(-2px);
+}
+
+.murder-board .form-input:disabled,
+.murder-board .form-group input:disabled,
+.murder-board .form-group textarea:disabled,
+.murder-board .form-group select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: rgba(0, 0, 0, 0.05);
+}
+
+/* Textarea specific adjustments */
+.murder-board .form-group textarea {
+  resize: vertical;
+  min-height: 120px;
+  font-family: 'Courier New', monospace;
+}
+
+/* ===== Form Range (Sliders) ===== */
+
+.murder-board .form-range,
+.murder-board .form-group input[type="range"] {
+  width: 100%;
+  height: 6px;
+  border-radius: var(--mb-radius-md);
+  background: linear-gradient(to right, var(--mb-secondary), var(--mb-primary));
+  outline: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  margin: var(--mb-spacing-md) 0;
+}
+
+.murder-board .form-range::-webkit-slider-thumb,
+.murder-board .form-group input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  border: 3px solid var(--mb-secondary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+  transition: var(--mb-transition-normal);
+}
+
+.murder-board .form-range::-webkit-slider-thumb:hover,
+.murder-board .form-group input[type="range"]::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.5);
+}
+
+.murder-board .form-range::-moz-range-thumb,
+.murder-board .form-group input[type="range"]::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: white;
+  border: 3px solid var(--mb-secondary);
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+  transition: var(--mb-transition-normal);
+}
+
+.murder-board .form-range::-moz-range-thumb:hover,
+.murder-board .form-group input[type="range"]::-moz-range-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.5);
+}
+
+/* ===== Form Help Text ===== */
+
+.murder-board .form-help {
+  font-size: var(--mb-font-sm);
+  color: rgba(0, 0, 0, 0.6);
+  margin-top: var(--mb-spacing-xs);
+  line-height: 1.4;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+body.theme-dark .murder-board .form-help,
+html.dark-mode .murder-board .form-help {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* ===== Checkbox Groups ===== */
+
+.murder-board .checkbox-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--mb-spacing-md);
+  margin-top: var(--mb-spacing-md);
+}
+
+.murder-board .checkbox-label,
+.murder-board .form-group .checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: var(--mb-spacing-md);
+  font-size: var(--mb-font-base);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+  cursor: pointer;
+  user-select: none;
+}
+
+.murder-board .checkbox-label input[type="checkbox"],
+.murder-board .form-group .checkbox-label input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  cursor: pointer;
+  flex-shrink: 0;
+  accent-color: var(--mb-secondary);
+  border-radius: 3px;
+}
+
+.murder-board .checkbox-label input[type="checkbox"]:focus,
+.murder-board .form-group .checkbox-label input[type="checkbox"]:focus {
+  outline: 2px solid var(--mb-secondary);
+  outline-offset: 2px;
+}
+
+/* ===== Form Sections (for grouped content) ===== */
+
+.murder-board .form-section {
+  margin-bottom: var(--mb-spacing-4xl);
+  padding-bottom: var(--mb-spacing-3xl);
+  border-bottom: 1px solid var(--mb-dialog-input-border);
+}
+
+.murder-board .form-section:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.murder-board .section-title {
+  margin: 0 0 var(--mb-spacing-2xl) 0;
+  font-size: var(--mb-font-lg);
+  font-weight: 700;
+  color: var(--mb-text);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* ===== Form Validation States ===== */
+
+.murder-board .form-input.error,
+.murder-board .form-group input.error,
+.murder-board .form-group textarea.error,
+.murder-board .form-group select.error {
+  border-color: var(--mb-danger);
+  background-color: rgba(244, 67, 54, 0.05);
+}
+
+.murder-board .form-input.error:focus,
+.murder-board .form-group input.error:focus,
+.murder-board .form-group textarea.error:focus,
+.murder-board .form-group select.error:focus {
+  box-shadow: 0 0 0 3px rgba(244, 67, 54, 0.15);
+  border-color: var(--mb-danger);
+}
+
+.murder-board .error-message {
+  font-size: var(--mb-font-sm);
+  color: var(--mb-danger);
+  margin-top: var(--mb-spacing-xs);
+  font-weight: 500;
+}
+
+.murder-board .form-input.success,
+.murder-board .form-group input.success,
+.murder-board .form-group textarea.success,
+.murder-board .form-group select.success {
+  border-color: var(--mb-primary);
+}
+
+.murder-board .form-input.success:focus,
+.murder-board .form-group input.success:focus,
+.murder-board .form-group textarea.success:focus,
+.murder-board .form-group select.success:focus {
+  box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.15);
+  border-color: var(--mb-primary);
+}
+
+/* ===== File Input Wrapper ===== */
+
+.murder-board .file-input-wrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--mb-spacing-sm);
+}
+
+.murder-board .file-input-wrapper input[type="text"] {
+  width: 100%;
+}
+
+.murder-board .file-input-wrapper button {
+  text-align: center;
+  padding: var(--mb-spacing-md) var(--mb-spacing-lg);
+  font-size: var(--mb-font-base);
+}
+
+/* ===== Font Select Wrapper ===== */
+
+.murder-board .font-select-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--mb-spacing-md);
+}
+
+.murder-board .font-select-wrapper select {
+  flex: 1;
+}
+
+.murder-board .font-display {
+  padding: var(--mb-spacing-md) var(--mb-spacing-lg);
+  background: var(--mb-light);
+  border-radius: var(--mb-radius-sm);
+  border: 2px solid var(--mb-dialog-input-border);
+  font-size: var(--mb-font-base);
+  color: var(--mb-text);
+  min-width: 150px;
+  text-align: center;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+/* ===== Form Layout Utilities ===== */
+
+.murder-board .form-row {
+  display: flex;
+  gap: var(--mb-spacing-lg);
+}
+
+.murder-board .form-row .form-group {
+  flex: 1;
+}
+
+.murder-board .form-row-thirds .form-group {
+  flex: 0 1 calc(33.333% - var(--mb-spacing-md));
+}
+
+.murder-board .form-row-half .form-group {
+  flex: 0 1 calc(50% - var(--mb-spacing-md)/2);
+}
