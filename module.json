@@ -35,5 +35,7 @@
         }
     ]
 }
-    "manifest": "https://github.com/marafrass/MB/edit/main/module.json",
+    "manifest": "https://github.com/marafrass/MB/main/module.json",
+    "download": "https://github.com/marafrass/MB/main/murder-board-v1.2.1.zip",
 }
+
