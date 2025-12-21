@@ -1,43 +1,47 @@
+
 {
-  "id": "murder-board",
-  "title": "Murder Board",
-  "description": "An interactive and collaborative module for visualization in Foundry VTT",
+  "id": "quick-journal-page-sort",
+  "title": "Quick Journal Page Sort",
+  "version": "1.0.7",
+  "compatibility": {
+    "minimum": "12",
+    "verified": "13",
+    "maximum": "13"
+  },
+  "description": "Allows to sort journal pages alphabetical by adding a button in the journal page",
   "authors": [
     {
-      "name": "Fuligin Heart"
+      "name": "CePeU",
+      "discord": "CePeU",
+      "flags": {}
     }
   ],
-  "version": "1.2.1",
-  "compatibility": {
-    "minimum": "13",
-    "verified": "13.351"
-  },
-  "socket": true,
   "esmodules": [
-    "src/murder-board.js"
-  ],
+  "scripts/main.js"
+],
   "styles": [
-    "styles/murder-board.css"
+    "styles/quick-journal-page-sort.css"
   ],
   "languages": [
     {
       "lang": "en",
       "name": "English",
       "path": "lang/en.json"
+    },
+    {
+      "lang": "de",
+      "name": "Deutsch",
+      "path": "lang/de.json"
     }
   ],
-  "relationships": {
-    "systems": [],
-    "requires": [
-        {
-            "id": "socketlib",
-            "type": "module"
-        }
-    ],
-
-    "manifest": "https://github.com/marafrass/MB/raw/main/module.json",
-    "download": "https://github.com/marafrass/MB/raw/main/murder-board-v1.2.1.zip",
+"url": "https://github.com/CePeU/Quick-Journal-Page-Sort",
+"manifest": "https://github.com/CePeU/Quick-Journal-Page-Sort/releases/latest/download/module.json",
+"download": "https://github.com/CePeU/Quick-Journal-Page-Sort/releases/latest/download/quick-journal-page-sort.zip",
+"readme": "https://github.com/CePeU/Quick-Journal-Page-Sort/blob/main/README.md",
+"bugs": "https://github.com/CePeU/Quick-Journal-Page-Sort/issues",
+"changelog": "https://github.com/CePeU/Quick-Journal-Page-Sort/blob/main/CHANGELOG.md",
+"library": false,
+"media": [] 
 }
-
 
 
