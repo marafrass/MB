@@ -339,8 +339,6 @@ html.dark-mode {
   padding: var(--mb-spacing-sm) var(--mb-spacing-md);
   border: 2px solid var(--mb-border);
   border-radius: var(--mb-radius-sm);
-  background: var(--mb-light);
-  color: var(--mb-text);
   font-size: var(--mb-font-md);
   font-weight: 500;
   cursor: pointer;
@@ -350,6 +348,8 @@ html.dark-mode {
   min-width: 150px;
   flex: 1;
   max-width: 350px;
+  color: #000000;
+  background-color: #ffffff;
 }
 
 .murder-board-board-selector:hover {
@@ -372,7 +372,13 @@ html.dark-mode {
   touch-action: none;
   pointer-events: auto;
   position: absolute;
-  image-rendering: pixelated;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 100%;
+  image-rendering: auto;
 }
 
 .murder-board-canvas-wrapper {
@@ -515,40 +521,115 @@ html.dark-mode .murder-board-context-menu .murder-board-menu-item i {
   color: #42A5F5 !important;
 }
 
-/* Item Dialog Styles */
+/* Z-Index Control Buttons */
+.murder-board-context-menu .murder-board-zindex-controls {
+  display: flex !important;
+  gap: 6px !important;
+  margin-bottom: 8px !important;
+  padding-bottom: 8px !important;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1) !important;
+}
+
+.murder-board-context-menu .murder-board-zindex-btn {
+  flex: 1;
+  padding: 8px 6px !important;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--mb-secondary);
+  transition: all 0.15s ease;
+  user-select: none;
+  background: var(--mb-light);
+  border: 1px solid var(--mb-border);
+  border-radius: 3px;
+  font-family: inherit;
+  min-width: 32px;
+  height: 32px;
+}
+
+.murder-board-context-menu .murder-board-zindex-btn:hover {
+  background: var(--mb-context-menu-hover-bg);
+  transform: scale(1.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.murder-board-context-menu .murder-board-zindex-btn i {
+  font-size: 16px;
+  color: var(--mb-secondary);
+}
+
+body.theme-dark .murder-board-context-menu .murder-board-zindex-btn,
+html.dark-mode .murder-board-context-menu .murder-board-zindex-btn {
+  color: #42A5F5 !important;
+  background-color: #3a3a3a !important;
+  border-color: #444444 !important;
+}
+
+body.theme-dark .murder-board-context-menu .murder-board-zindex-btn:hover,
+html.dark-mode .murder-board-context-menu .murder-board-zindex-btn:hover {
+  background: rgba(66, 165, 245, 0.2) !important;
+  color: #42A5F5 !important;
+}
+
+body.theme-dark .murder-board-context-menu .murder-board-zindex-btn i,
+html.dark-mode .murder-board-context-menu .murder-board-zindex-btn i {
+  color: #42A5F5 !important;
+}
+
+/* ===== Item Dialog Window Styles ===== */
+
 .murder-board-item-dialog {
   padding: 0;
-  background: var(--mb-dialog-bg);
+  background: var(--mb-dialog-bg) !important;
   display: flex;
   flex-direction: column;
+  height: 100%;
+  opacity: 1 !important;
 }
+
+.application.window[id*="murder-board-item-dialog"] .window-content {
+  background: var(--mb-dialog-bg) !important;
+  display: flex;
+  flex-direction: column;
+  opacity: 1 !important;
+}
+
+.window.murder-board-window .murder-board-item-dialog {
+  max-height: 100%;
+}
+
+/* ===== Item Form Container ===== */
 
 .murder-board-item-form {
   flex: 1;
-  padding: var(--mb-spacing-4xl);
+  padding: var(--mb-spacing-4xl) var(--mb-spacing-4xl);
   display: flex;
   flex-direction: column;
-  gap: var(--mb-spacing-2xl);
+  gap: var(--mb-spacing-3xl);
   overflow-y: auto;
+  min-height: 0;
+  background: var(--mb-dialog-bg) !important;
 }
 
-/* Form Groups */
-.murder-board-item-dialog .form-group {
-  display: flex;
-  flex-direction: column;
-  gap: var(--mb-spacing-sm);
+.murder-board-item-form.murder-board-quick-form {
+  gap: var(--mb-spacing-lg);
+  padding: var(--mb-spacing-3xl);
+  flex: 0 1 auto;
 }
 
-.murder-board-item-dialog label {
-  display: block;
-  font-weight: 600;
-  font-size: var(--mb-font-base);
-  color: var(--mb-dialog-label-color);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
+/* Quick dialog specific - remove height constraints */
+.application.murder-board-quick-dialog,
+.application.murder-board-quick-dialog .window-content,
+.application.murder-board-quick-dialog .murder-board-item-dialog {
+  height: auto !important;
+  flex: 0 1 auto !important;
 }
 
-/* Input Fields */
+/* ===== Legacy Compatibility Selectors (Deprecated) ===== */
+/* These maintain backward compatibility with old templates */
+
 .form-input,
 .form-textarea {
   width: 100%;
@@ -572,34 +653,12 @@ html.dark-mode .murder-board-context-menu .murder-board-menu-item i {
 
 .form-textarea {
   resize: vertical;
-  min-height: 140px;
+  min-height: 120px;
   font-family: 'Courier New', monospace;
   line-height: 1.5;
 }
 
-.murder-board-item-dialog input[type="text"],
-.murder-board-item-dialog input[type="color"],
-.murder-board-item-dialog textarea,
-.murder-board-item-dialog select {
-  width: 100%;
-  padding: var(--mb-spacing-md) var(--mb-spacing-lg);
-  border: 2px solid var(--mb-dialog-input-border);
-  border-radius: var(--mb-radius-sm);
-  font-size: 14px;
-  box-sizing: border-box;
-  font-family: inherit;
-  transition: all 0.2s ease;
-  background-color: var(--mb-dialog-input-bg);
-  color: var(--mb-text);
-}
-
-.murder-board-item-dialog input[type="text"]:focus,
-.murder-board-item-dialog textarea:focus,
-.murder-board-item-dialog select:focus {
-  outline: none;
-  border-color: var(--mb-secondary);
-  box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
-}
+/* ===== Input Colors & Select Dropdowns ===== */
 
 .murder-board-item-dialog input[type="color"] {
   width: 80px;
@@ -607,26 +666,31 @@ html.dark-mode .murder-board-context-menu .murder-board-menu-item i {
   padding: 4px;
   cursor: pointer;
   border-radius: 8px;
+  border: 2px solid var(--mb-dialog-input-border);
 }
 
-/* File Input Wrapper */
-.murder-board-item-dialog .file-input-wrapper {
-  display: flex;
-  flex-direction: row;
-  gap: var(--mb-spacing-sm);
-  align-items: center;
+.murder-board-item-dialog select {
+  appearance: none;
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666'%3e%3cpath d='M6 9l6 6 6-6'/%3e%3c/svg%3e");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  background-size: 18px;
+  padding-right: 40px;
 }
 
-.murder-board-item-dialog .file-input-wrapper .btn {
-  width: 100%;
-  text-align: center;
-  padding: 12px 14px;
-  font-size: 14px;
-  font-weight: 500;
+.murder-board-item-dialog select::-ms-expand {
+  display: none;
 }
 
-.murder-board-item-dialog .file-input-wrapper .btn i {
-  margin-right: 6px;
+/* ===== Board Settings & Other Dialogs ===== */
+
+/* Board Settings Dialog - Override font select styling */
+.murder-board-settings-dialog select {
+  color: #000000 !important;
+  background-color: #ffffff !important;
+  appearance: auto !important;
+  background-image: none !important;
+  padding-right: var(--mb-spacing-lg) !important;
 }
 
 /* Background Image Controls */
@@ -652,21 +716,9 @@ html.dark-mode .murder-board-context-menu .murder-board-menu-item i {
   justify-content: center;
 }
 
-/* Select */
-.murder-board-item-dialog select {
-  appearance: none;
-  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666'%3e%3cpath d='M6 9l6 6 6-6'/%3e%3c/svg%3e");
-  background-repeat: no-repeat;
-  background-position: right 12px center;
-  background-size: 18px;
-  padding-right: 40px;
-}
+/* ===== Font Select Wrapper - Dialog Specific ===== */
+/* Base styles are in form-groups.css, these are dialog-specific overrides */
 
-.murder-board-item-dialog select::-ms-expand {
-  display: none;
-}
-
-/* Font Select */
 .font-select-wrapper {
   position: relative;
   display: block;
@@ -678,6 +730,7 @@ html.dark-mode .murder-board-context-menu .murder-board-menu-item i {
   top: 0;
   left: 0;
   width: 100%;
+  height: 100%;
   opacity: 0;
   z-index: 2;
   cursor: pointer;
@@ -688,108 +741,90 @@ html.dark-mode .murder-board-context-menu .murder-board-menu-item i {
   width: 100%;
   padding: 12px 14px;
   border: 2px solid var(--mb-dialog-input-border);
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 14px;
   box-sizing: border-box;
   background-color: var(--mb-dialog-input-bg);
   color: var(--mb-text);
   pointer-events: none;
-  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666'%3e%3cpath d='M6 9l6 6 6-6'/%3e%3c/svg%3e");
+  background-image: url("data:image/svg+xml;charset=UTF-8,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232196F3'%3e%3cpath d='M6 9l6 6 6-6' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3e%3c/svg%3e");
   background-repeat: no-repeat;
   background-position: right 12px center;
   background-size: 18px;
   padding-right: 40px;
   transition: all 0.2s ease;
+  font-weight: 500;
 }
 
 .font-select-wrapper:hover .font-display {
   border-color: var(--mb-secondary);
+  box-shadow: inset 0 0 0 1px rgba(33, 150, 243, 0.1);
 }
 
-/* Checkbox Styling */
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: var(--mb-spacing-sm);
-  font-size: var(--mb-font-base);
-  font-weight: 500;
-  text-transform: none;
-  letter-spacing: normal;
-  cursor: pointer;
-  user-select: none;
-  margin: 0;
+.font-select-wrapper select:focus + .font-display {
+  border-color: var(--mb-secondary);
+  box-shadow: 0 0 0 4px rgba(33, 150, 243, 0.1);
+  outline: none;
 }
 
-.checkbox-label input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  flex-shrink: 0;
-  accent-color: var(--mb-secondary);
-  border-radius: 3px;
-}
+/* ===== Dialog Buttons Footer ===== */
 
-.checkbox-label input[type="checkbox"]:focus {
-  outline: 2px solid var(--mb-secondary);
-  outline-offset: 2px;
-}
-
-/* Dialog Buttons Footer */
 .murder-board-item-dialog .dialog-buttons {
   display: flex;
-  gap: var(--mb-spacing-md);
-  justify-content: flex-end;
-  margin-top: auto;
-  padding: var(--mb-spacing-2xl) var(--mb-spacing-4xl);
-  border-top: 1px solid var(--mb-dialog-input-border);
-  background: rgba(0, 0, 0, 0.02);
+  gap: var(--mb-spacing-lg);
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--mb-spacing-3xl) var(--mb-spacing-4xl);
+  border-top: none;
+  background: transparent;
   flex-shrink: 0;
 }
 
 .murder-board-item-dialog .btn {
-  padding: var(--mb-spacing-md) var(--mb-spacing-3xl);
-  border: 2px solid;
-  border-radius: var(--mb-radius-sm);
+  padding: 10px 20px;
+  border: none;
+  border-radius: 6px;
   cursor: pointer;
-  font-size: var(--mb-font-base);
+  font-size: 13px;
   font-weight: 600;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
   display: inline-flex;
   align-items: center;
-  gap: var(--mb-spacing-sm);
+  justify-content: center;
+  gap: 6px;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
+  min-width: 100px;
 }
 
 .murder-board-item-dialog .btn:hover {
-  transform: translateY(-2px);
+  transform: none;
 }
 
 .murder-board-item-dialog .btn-primary {
-  background: linear-gradient(135deg, var(--mb-primary) 0%, var(--mb-primary-dark) 100%);
+  background: var(--mb-primary);
   color: white;
-  border-color: var(--mb-primary-dark);
-  box-shadow: 0 4px 12px rgba(76, 175, 80, 0.25);
+  box-shadow: var(--mb-shadow-md);
 }
 
 .murder-board-item-dialog .btn-primary:hover {
-  box-shadow: 0 6px 18px rgba(76, 175, 80, 0.35);
+  background: var(--mb-primary-dark);
+  box-shadow: 0 6px 16px rgba(76, 175, 80, 0.3);
 }
 
 .murder-board-item-dialog .btn-primary:active {
-  transform: translateY(0);
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .murder-board-item-dialog .btn-secondary {
-  background-color: var(--mb-light);
+  background-color: var(--mb-border);
   color: var(--mb-text);
-  border-color: var(--mb-dialog-input-border);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  border: 1px solid var(--mb-dialog-input-border);
+  box-shadow: var(--mb-shadow-sm);
 }
 
 .murder-board-item-dialog .btn-secondary:hover {
-  background-color: var(--mb-border);
+  background-color: var(--mb-light);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
 }
 
@@ -2058,4 +2093,201 @@ html.dark-mode .murder-board-font-slider {
   background: #444444;
 }
 
+/**
+ * Inline Edit Dialog Styles - Dark Mode (Default)
+ */
+/**
+ * Inline Edit Dialog Styles - Dark Mode (Default)
+ */
+.murder-board-inline-edit-dialog {
+  background: #ffffff !important;
+  border: 2px solid #2196F3 !important;
+  border-radius: 12px !important;
+  padding: 0 !important;
+  z-index: 10001 !important;
+  box-shadow: 0 8px 32px rgba(33, 150, 243, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15) !important;
+  min-width: 400px;
+  max-width: 550px;
+  font-family: inherit;
+}
 
+.murder-board-inline-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.murder-board-inline-header {
+  background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+  color: #ffffff !important;
+  padding: 16px 18px;
+  font-weight: 700;
+  font-size: 15px;
+  border-bottom: 2px solid rgba(33, 150, 243, 0.3);
+  border-radius: 10px 10px 0 0;
+  cursor: move;
+  user-select: none;
+}
+
+.murder-board-inline-label {
+  display: block;
+  font-weight: 600;
+  font-size: 12px;
+  color: #1976D2 !important;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 14px 18px 8px 18px;
+  margin: 0;
+}
+
+.murder-board-inline-input,
+.murder-board-inline-input-group {
+  padding: 0 18px 14px 18px;
+}
+
+.murder-board-inline-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 2px solid #E3F2FD;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: #333 !important;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  transition: all 0.2s ease;
+}
+
+.murder-board-inline-input:focus {
+  outline: none;
+  border-color: #2196F3;
+  box-shadow: inset 0 0 0 1px rgba(33, 150, 243, 0.3), 0 0 0 4px rgba(33, 150, 243, 0.08);
+  background: #ffffff;
+}
+
+textarea.murder-board-inline-input {
+  min-height: 140px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  resize: vertical;
+}
+
+.murder-board-inline-input-group {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.murder-board-inline-input-group input {
+  flex: 1;
+}
+
+.murder-board-inline-file-picker {
+  padding: 11px 14px;
+  border: 2px solid #E3F2FD;
+  background: #E3F2FD;
+  color: #1976D2;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.murder-board-inline-file-picker:hover {
+  background: #2196F3;
+  color: white;
+  border-color: #1976D2;
+}
+
+.murder-board-inline-buttons {
+  display: flex;
+  gap: 10px;
+  padding: 14px 18px;
+  border-top: 1px solid #E3F2FD;
+  justify-content: flex-end;
+  background: #f5f9ff;
+}
+
+.murder-board-inline-cancel,
+.murder-board-inline-save {
+  padding: 11px 18px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  transition: all 0.15s ease;
+  min-width: 80px;
+  text-align: center;
+}
+
+.murder-board-inline-cancel {
+  background: #f0f0f0;
+  color: #555;
+  border: 1px solid #ddd;
+}
+
+.murder-board-inline-cancel:hover {
+  background: #e8e8e8;
+  border-color: #ccc;
+}
+
+.murder-board-inline-save {
+  background: linear-gradient(135deg, #2196F3 0%, #1976D2 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(33, 150, 243, 0.3);
+}
+
+.murder-board-inline-save:hover {
+  box-shadow: 0 6px 16px rgba(33, 150, 243, 0.4);
+  transform: translateY(-1px);
+}
+.murder-board-inline-buttons {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--mb-border);
+  justify-content: flex-end;
+}
+
+.murder-board-inline-cancel,
+.murder-board-inline-save {
+  padding: 8px 16px;
+  border: 1px solid var(--mb-border);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.2s;
+  min-width: 80px;
+  text-align: center;
+}
+
+.murder-board-inline-cancel {
+  background: var(--mb-secondary);
+  color: var(--mb-text);
+}
+
+.murder-board-inline-cancel:hover {
+  background: var(--mb-secondary-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.murder-board-inline-save {
+  background: #2a8f34;
+  color: white;
+  border-color: #1f6b27;
+  font-weight: bold;
+}
+
+.murder-board-inline-save:hover {
+  background: #229b31;
+  transform: translateY(-1px);
+  box-shadow: 0 2px 6px rgba(42, 143, 52, 0.3);

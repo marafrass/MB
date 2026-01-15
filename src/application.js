@@ -4,7 +4,6 @@
  */
 
 import { MurderBoardData } from './data-model.js';
-import { NoteItemDialog, TextItemDialog, ImageItemDialog, DocumentItemDialog } from './item-dialogs.js';
 import { emitSocketMessage } from './socket-handler.js';
 
 const { HandlebarsApplicationMixin, ApplicationV2 } = foundry.applications.api;
@@ -31,7 +30,8 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       'board-settings': MurderBoardApplication.prototype._onBoardSettings,
       'center-canvas': MurderBoardApplication.prototype._onCenterCanvas,
       'toggle-fullscreen': MurderBoardApplication.prototype._onToggleFullscreen,
-      'toggle-center': MurderBoardApplication.prototype._onToggleCenter,
+      'export-board': MurderBoardApplication.prototype._onExportBoard,
+      'import-board': MurderBoardApplication.prototype._onImportBoard,
     },
   };
 
@@ -74,6 +74,15 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     this.dragOverItem = null; // Track item being dragged over (for connections)
     this.cameraUpdateTimeout = null; // For debouncing camera state saves
     
+    // Panning state
+    this.isPanning = false;
+    this.isRightClickPanning = false; // Track if we're in right-click panning state
+    this.rightClickPanned = false; // Track if right-click actually resulted in a pan
+    this.panStartX = 0;
+    this.panStartY = 0;
+    this.panStartCameraX = 0;
+    this.panStartCameraY = 0;
+    
     // Drag box selection
     this.isBoxSelecting = false;
     this.boxSelectStart = { x: 0, y: 0 };
@@ -99,21 +108,115 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
   }
 
   /**
+   * Build a compact color picker section for context menus
+   * @param {string} label - Label for the color picker (e.g., "Note Color")
+   * @param {Array} colors - Array of color objects with hex and label
+   * @param {string} currentColor - Currently selected color hex
+   * @param {string} buttonClass - CSS class for the color buttons
+   * @returns {string} HTML string for the color picker section
+   * @private
+   */
+  _buildCompactColorPicker(label, colors, currentColor, buttonClass = 'murder-board-color-swatch') {
+    let html = `<div class="murder-board-context-section" style="display: flex; align-items: center; gap: 8px;">`;
+    html += `<div class="murder-board-context-section-label" style="margin-bottom: 0; flex-shrink: 0;">${label}</div>`;
+    html += `<div style="display: flex; gap: 4px; flex-wrap: wrap; flex: 1;">`;
+    
+    for (let color of colors) {
+      const isSelected = color.hex.toUpperCase() === currentColor.toUpperCase();
+      html += `
+        <button class="${buttonClass} ${isSelected ? 'selected' : ''}" data-color="${color.hex}"
+                style="flex: 1; min-width: 30px; height: 30px; padding: 0; background: ${color.hex}; border: ${isSelected ? '3px solid var(--mb-secondary)' : '2px solid var(--mb-border)'};"
+                title="${color.label}">
+        </button>
+      `;
+    }
+    html += `</div></div>`;
+    return html;
+  }
+
+  /**
+   * Get available fonts for item dialogs and context menus
+   * @returns {Array} Array of font objects with value and label
+   * @private
+   */
+  _getAvailableFonts() {
+    const fonts = [];
+
+    // Get custom fonts from game.settings (user-uploaded fonts)
+    try {
+      const customFontGroups = game.settings.get('core', 'fonts');
+      
+      if (customFontGroups && typeof customFontGroups === 'object') {
+        for (const [groupName, groupData] of Object.entries(customFontGroups)) {
+          // Each custom font group has a 'fonts' array with actual font definitions
+          if (groupData.fonts && Array.isArray(groupData.fonts)) {
+            for (const fontDef of groupData.fonts) {
+              fonts.push({
+                value: fontDef.name || groupName,
+                label: fontDef.label || fontDef.name || groupName,
+                family: fontDef.family || fontDef.name || groupName
+              });
+            }
+          } else {
+            // Fallback if structure is different
+            fonts.push({
+              value: groupName,
+              label: groupData.label || groupName,
+              family: groupData.family || groupName
+            });
+          }
+        }
+      }
+    } catch (error) {
+      // Silent fail, continue to core fonts
+    }
+
+    // Get core fonts from CONFIG.fontDefinitions
+    if (CONFIG.fontDefinitions) {
+      for (const [fontKey, fontDef] of Object.entries(CONFIG.fontDefinitions)) {
+        fonts.push({
+          value: fontKey,
+          label: fontDef.label || fontKey,
+          family: fontDef.family || fontKey
+        });
+      }
+    }
+
+    // Fallback to common web fonts if no fonts are available at all
+    if (fonts.length === 0) {
+      return [
+        { value: 'Arial', label: 'Arial (Clean)', family: 'Arial' },
+        { value: 'Georgia', label: 'Georgia (Serif)', family: 'Georgia' },
+        { value: 'Courier New', label: 'Courier (Monospace)', family: 'Courier New' },
+        { value: 'Comic Sans MS', label: 'Comic Sans (Casual)', family: 'Comic Sans MS' },
+        { value: 'Caveat', label: 'Caveat (Handwriting)', family: 'Caveat' },
+        { value: 'Permanent Marker', label: 'Permanent Marker (Marker)', family: 'Permanent Marker' },
+        { value: 'Reenie Beanie', label: 'Reenie Beanie (Sketch)', family: 'Reenie Beanie' }
+      ];
+    }
+
+    return fonts;
+  }
+
+  /**
    * Get context data for the template
    * @param {Object} options - Preparation options
    * @returns {Object} Context data
    */
   async _prepareContext(options) {
-    const scene = this.scene;
-    const boardData = MurderBoardData.getBoardData(scene);
+    const boardData = MurderBoardData.getGlobalBoardData();
 
-    // Get all available boards from scene flags
-    const allBoards = MurderBoardData.getAllBoards(scene) || [];
-    const availableBoards = allBoards.map(board => ({
-      id: board.id,
-      name: board.name || 'Untitled Board',
-      isActive: board.id === boardData.id,
-    }));
+    // Get all available boards globally, filtered by view permissions
+    const allBoards = MurderBoardData.getGlobalBoards();
+    const currentBoardId = MurderBoardData.getGlobalCurrentBoardId();
+    
+    const availableBoards = allBoards
+      .filter(board => MurderBoardData.canUserViewBoard(board.id))
+      .map(board => ({
+        id: board.id,
+        name: board.name || 'Untitled Board',
+        isActive: board.id === currentBoardId,
+      }));
 
     return {
       boardType: boardData.boardType,
@@ -131,6 +234,11 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
   async _onFirstRender(context, options) {
     await super._onFirstRender(context, options);
     
+    // Store reference to this app globally for debugging
+    if (!globalThis.murderBoardDebug.activeApp) {
+      globalThis.murderBoardDebug.activeApp = this;
+    }
+    
     // Set window to fill entire screen (like fullscreen button does)
     this.setPosition({
       top: 0,
@@ -145,6 +253,11 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
    */
   async _onClose(options) {
     try {
+      // Clear the global reference when closing
+      if (globalThis.murderBoardDebug.activeApp === this) {
+        globalThis.murderBoardDebug.activeApp = null;
+      }
+      
       // Save window position before closing to game settings
       if (this.position && this.scene) {
         const allPositions = game.settings.get('murder-board', 'windowPositions') || {};
@@ -171,7 +284,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         if (this._boundMouseDown) container.removeEventListener('mousedown', this._boundMouseDown);
         if (this._boundMouseMove) container.removeEventListener('mousemove', this._boundMouseMove);
         if (this._boundMouseUp) container.removeEventListener('mouseup', this._boundMouseUp);
-        if (this._boundContextMenu) container.removeEventListener('contextmenu', this._boundContextMenu);
+        if (this._boundContextMenu) container.removeEventListener('contextmenu', this._boundContextMenu, { capture: true });
         if (this._boundWheel) container.removeEventListener('wheel', this._boundWheel);
         if (this._boundDoubleClick) container.removeEventListener('dblclick', this._boundDoubleClick);
         if (this._boundDragOver) container.removeEventListener('dragover', this._boundDragOver);
@@ -182,9 +295,21 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       // Remove global listeners
       if (this._boundWindowMouseUp) window.removeEventListener('mouseup', this._boundWindowMouseUp);
       if (this._boundKeyDown) document.removeEventListener('keydown', this._boundKeyDown);
+      if (this._boundKeyUp) document.removeEventListener('keyup', this._boundKeyUp);
       if (this._boundWindowResize) window.removeEventListener('resize', this._boundWindowResize);
     } catch (error) {
       console.error('Murder Board | Error in _onClose:', error);
+    }
+
+    // Always remove any lingering context menus to prevent rendering artifacts (do this after try/catch)
+    try {
+      document.querySelectorAll('.murder-board-context-menu').forEach(menu => {
+        menu.style.display = 'none';
+        menu.style.visibility = 'hidden';
+        menu.remove();
+      });
+    } catch (e) {
+      // Silently fail if menu cleanup has issues
     }
 
     // Call parent close
@@ -200,10 +325,8 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     // Store reference to this application for item dialogs
     game.murderBoard.mainBoard = this;
 
-    // Initialize board data if needed
-    if (!this.scene.flags['murder-board']) {
-      await MurderBoardData.initializeBoard(this.scene);
-    }
+    // Note: Board initialization is no longer needed - boards are now stored globally
+    // and are available from any scene
 
     // Get canvas element
     this.canvas = this.element.querySelector('#murder-board-canvas');
@@ -211,6 +334,9 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       console.error('Murder Board | Canvas element not found');
       return;
     }
+
+    // Remove any title attribute that might show unwanted tooltips when hovering
+    this.canvas.removeAttribute('title');
 
     // Import renderer
     const { CanvasRenderer } = await import('./canvas-renderer.js');
@@ -263,16 +389,8 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     // Resize canvas if window dimensions changed
     if (position.width !== oldWidth || position.height !== oldHeight) {
       if (this.canvas && this.renderer) {
+        // _resizeCanvas() now handles the draw() call internally
         this._resizeCanvas();
-        this.renderer.draw();
-        
-        // Re-apply position to trigger layout cascade (happens every frame while resizing)
-        this.setPosition({
-          width: this.position.width,
-          height: this.position.height,
-          top: this.position.top,
-          left: this.position.left,
-        });
       }
     }
   }
@@ -306,17 +424,28 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     const wrapperWidth = wrapper.offsetWidth;
     const wrapperHeight = wrapper.offsetHeight;
     
-    // Set canvas to fill entire wrapper
-    this.canvas.width = wrapperWidth;
-    this.canvas.height = wrapperHeight;
+    // Get device pixel ratio for high-DPI support (fixes dead pixels on Retina/4K)
+    const dpr = window.devicePixelRatio || 1;
     
-    // Set canvas CSS display size to match
+    // Set canvas resolution (internal pixel count) using device pixel ratio
+    this.canvas.width = wrapperWidth * dpr;
+    this.canvas.height = wrapperHeight * dpr;
+    
+    // Set canvas CSS display size to fill wrapper
     this.canvas.style.width = wrapperWidth + 'px';
     this.canvas.style.height = wrapperHeight + 'px';
-    
-    // No centering needed - canvas fills the entire space
     this.canvas.style.left = '0px';
     this.canvas.style.top = '0px';
+    
+    // Scale canvas context to account for device pixel ratio
+    if (this.renderer && this.renderer.ctx) {
+      this.renderer.ctx.scale(dpr, dpr);
+    }
+    
+    // Force immediate redraw after resize to prevent dead pixels
+    if (this.renderer) {
+      this.renderer.draw();
+    }
   }
 
   /**
@@ -326,6 +455,9 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     // Since canvas has pointer-events: none to allow window dragging,
     // we need to attach listeners to the parent container instead
     const container = this.canvas.parentElement;
+    
+    // Remove any title attribute from the container as well
+    container.removeAttribute('title');
     
     // Bind handlers once to enable removal later and ensure proper cleanup
     this._boundMouseDown = this._onCanvasMouseDown.bind(this);
@@ -339,7 +471,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     container.addEventListener('mousedown', this._boundMouseDown);
     container.addEventListener('mousemove', this._boundMouseMove);
     container.addEventListener('mouseup', this._boundMouseUp);
-    container.addEventListener('contextmenu', this._boundContextMenu);
+    container.addEventListener('contextmenu', this._boundContextMenu, { capture: true });
     container.addEventListener('wheel', this._boundWheel, { passive: false });
     container.addEventListener('dblclick', this._boundDoubleClick);
     
@@ -372,6 +504,11 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     this.focusedItemId = null;
     this.focusCameraState = null;
     this.isAnimatingZoom = false;
+
+    // Track pressed keys to prevent repeated keydown firing
+    this.pressedKeys = new Set();
+    this._boundKeyUp = this._onCanvasKeyUp.bind(this);
+    document.addEventListener('keyup', this._boundKeyUp);
   }
 
   /**
@@ -417,15 +554,21 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     // Reset all drag flags
     this.isDragging = false;
     this.isPanning = false;
+    this.isRightClickPanning = false;
+    this.rightClickPanned = false;
     this.isBoxSelecting = false;
     this.isResizing = false;
+    this.isRotating = false;
+    this.isDraggingLabel = false;
     this.resizeItemId = null;
     this.resizeHandle = null;
     this.dragOverItem = null;
+    this.draggedConnectionId = null;
     
     // Reset renderer state
     if (this.renderer) {
       this.renderer.draggedItem = null;
+      this.renderer.draggedConnectionLabel = null;
       this.renderer.boxSelectRect = null;
       this.renderer.setHighlight(null);
       this.renderer.setHoverItem(null);
@@ -444,30 +587,61 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
    * @private
    */
   _getResizeHandleAtPoint(item, x, y) {
-    if (item.type !== 'Text') return null;
-
-    const worldPos = this.renderer.screenToWorld(x, y);
+    // Resize handles are now drawn in screen space (12px fixed size)
+    // So we need to detect them in screen space too
     const itemX = item.x;
     const itemY = item.y;
-    const itemWidth = item.data?.width || this.renderer.itemSize;
-    const itemHeight = item.data?.height || this.renderer.itemSize;
+    
+    // Get dimensions - use renderer method if available (which uses migrated data)
+    let itemWidth, itemHeight;
+    
+    // Try to use the renderer's dimension calculation first (has migrated data)
+    if (this.renderer && this.renderer._getItemDimensions) {
+      const dims = this.renderer._getItemDimensions(item);
+      itemWidth = dims.width;
+      itemHeight = dims.height;
+    } else {
+      // Fallback to manual calculation
+      if (item.type === 'Note') {
+        itemWidth = item.data?.width || 40;
+        itemHeight = item.data?.height || 40;
+      } else if (item.type === 'Image') {
+        itemWidth = item.data?.width || 80;
+        itemHeight = item.data?.height || 80;
+      } else if (item.type === 'Document') {
+        itemWidth = item.data?.width || 120;
+        itemHeight = item.data?.height || 140;
+      } else if (item.type === 'Text') {
+        itemWidth = item.data?.width || this.renderer.itemSize;
+        itemHeight = item.data?.height || this.renderer.itemSize;
+      } else {
+        itemWidth = item.data?.width || this.renderer.itemSize;
+        itemHeight = item.data?.height || this.renderer.itemSize;
+      }
+    }
+    
     const rotation = item.rotation || 0;
+    const handleSize = 12; // Screen space handle size (fixed, not zoomed)
+    const tolerance = handleSize / 2 + 2; // Match the visual handle size
 
-    const handleSize = 6;
-    const tolerance = handleSize + 4; // Allow more tolerance for rotated items
+    // Convert world coordinates to screen coordinates
+    const screenX = this.renderer.camera.x + itemX * this.renderer.camera.zoom;
+    const screenY = this.renderer.camera.y + itemY * this.renderer.camera.zoom;
+    const screenWidth = itemWidth * this.renderer.camera.zoom;
+    const screenHeight = itemHeight * this.renderer.camera.zoom;
 
-    // Calculate rotated corner positions
-    const centerX = itemX + itemWidth / 2;
-    const centerY = itemY + itemHeight / 2;
+    // Calculate rotated corner positions in screen space
+    const centerX = screenX + screenWidth / 2;
+    const centerY = screenY + screenHeight / 2;
     const cos = Math.cos(rotation * Math.PI / 180);
     const sin = Math.sin(rotation * Math.PI / 180);
 
     // Corner positions relative to center
     const corners = [
-      { relX: -itemWidth / 2, relY: -itemHeight / 2, type: 'nw' }, // Top-left
-      { relX: itemWidth / 2, relY: -itemHeight / 2, type: 'ne' }, // Top-right
-      { relX: -itemWidth / 2, relY: itemHeight / 2, type: 'sw' }, // Bottom-left
-      { relX: itemWidth / 2, relY: itemHeight / 2, type: 'se' }, // Bottom-right
+      { relX: -screenWidth / 2, relY: -screenHeight / 2, type: 'nw' }, // Top-left
+      { relX: screenWidth / 2, relY: -screenHeight / 2, type: 'ne' }, // Top-right
+      { relX: -screenWidth / 2, relY: screenHeight / 2, type: 'sw' }, // Bottom-left
+      { relX: screenWidth / 2, relY: screenHeight / 2, type: 'se' }, // Bottom-right
     ];
 
     // Transform corners by rotation
@@ -482,12 +656,30 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
 
     for (const corner of rotatedCorners) {
       const distance = Math.sqrt(
-        Math.pow(worldPos.x - corner.pos.x, 2) + 
-        Math.pow(worldPos.y - corner.pos.y, 2)
+        Math.pow(x - corner.pos.x, 2) + 
+        Math.pow(y - corner.pos.y, 2)
       );
       if (distance <= tolerance) {
         return corner.type;
       }
+    }
+    
+    // Check rotation handle (circular, above the item)
+    const rotateHandleDistance = 30;
+    const rotateHandleSize = 14;
+    const topRelX = 0;
+    const topRelY = -screenHeight / 2 - rotateHandleDistance;
+    const rotatedTopX = topRelX * cos - topRelY * sin;
+    const rotatedTopY = topRelX * sin + topRelY * cos;
+    const rotateHandleX = centerX + rotatedTopX;
+    const rotateHandleY = centerY + rotatedTopY;
+    
+    const rotateDistance = Math.sqrt(
+      Math.pow(x - rotateHandleX, 2) + 
+      Math.pow(y - rotateHandleY, 2)
+    );
+    if (rotateDistance <= rotateHandleSize / 2 + 2) {
+      return 'rotate';
     }
 
     return null;
@@ -520,38 +712,80 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
 
-      // Middle-click to pan
-      if (event.button === 1) {
-        this.isPanning = true;
+      // Right-click to pan (or context menu - track it to decide on release)
+      if (event.button === 2) {
+        event.preventDefault();
+        event.stopPropagation();
+        this.isRightClickPanning = true;
         this.panStartX = x;
         this.panStartY = y;
         this.panStartCameraX = this.renderer.camera.x;
         this.panStartCameraY = this.renderer.camera.y;
-        return;
-      }
-
-      // Ignore right-clicks
-      if (event.button === 2) {
-        return;
+        return false;
       }
 
       // Check if clicking on a resize handle for selected text items
       if (this.selectedItems.length === 1) {
         const selectedItemId = this.selectedItems[0];
-        const boardData = MurderBoardData.getBoardData(this.scene);
+        const boardData = MurderBoardData.getGlobalBoardData();
+        // Apply migrations to ensure items have correct dimensions
+        this.renderer._migrateOldItemData(boardData);
         const selectedItem = boardData.items.find(i => i.id === selectedItemId);
         
-        if (selectedItem && selectedItem.type === 'Text') {
+        if (selectedItem) {
           const resizeHandle = this._getResizeHandleAtPoint(selectedItem, x, y);
           if (resizeHandle) {
-            // Start resizing
+            // Check if it's the rotation handle
+            if (resizeHandle === 'rotate') {
+              this.isRotating = true;
+              this.rotateItemId = selectedItemId;
+              this.rotateStart = { x, y };
+              this.rotateStartAngle = selectedItem.rotation || 0;
+              this.rotatingItem = selectedItem; // Cache reference to avoid recalculation
+              
+              // Calculate center of item in screen space and lock it
+              const { width: itemWidth, height: itemHeight } = this.renderer._getItemDimensions(selectedItem);
+              const screenX = this.renderer.camera.x + selectedItem.x * this.renderer.camera.zoom;
+              const screenY = this.renderer.camera.y + selectedItem.y * this.renderer.camera.zoom;
+              const screenWidth = itemWidth * this.renderer.camera.zoom;
+              const screenHeight = itemHeight * this.renderer.camera.zoom;
+              this.rotateCenterX = screenX + screenWidth / 2;
+              this.rotateCenterY = screenY + screenHeight / 2;
+              return;
+            }
+            
+            // Start resizing (works for all item types)
             this.isResizing = true;
             this.resizeItemId = selectedItemId;
             this.resizeHandle = resizeHandle;
             this.resizeStart = { x, y };
+            
+            // Get default dimensions based on item type
+            let defaultWidth = 40, defaultHeight = 40;
+            if (selectedItem.type === 'Note') {
+              defaultWidth = 40;
+              defaultHeight = 40;
+            } else if (selectedItem.type === 'Image') {
+              defaultWidth = 80;
+              defaultHeight = 80;
+            } else if (selectedItem.type === 'Document') {
+              defaultWidth = 120;
+              defaultHeight = 140;
+            } else if (selectedItem.type === 'Text') {
+              defaultWidth = this.renderer.itemSize;
+              defaultHeight = this.renderer.itemSize;
+            } else {
+              defaultWidth = this.renderer.itemSize;
+              defaultHeight = this.renderer.itemSize;
+            }
+            
             this.resizeStartDimensions = {
-              width: selectedItem.data?.width || this.renderer.itemSize,
-              height: selectedItem.data?.height || this.renderer.itemSize
+              width: selectedItem.data?.width || defaultWidth,
+              height: selectedItem.data?.height || defaultHeight
+            };
+            this.resizeStartPosition = {
+              x: selectedItem.x || 0,
+              y: selectedItem.y || 0
             };
             return;
           }
@@ -584,13 +818,29 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         this.dragStart = { x, y };
         this.dragItemStartPos = { x: item.x, y: item.y }; // Save first item's current position
         
-        // Save starting positions of all selected items
+        // Save starting positions of all selected items and any items in their groups
         this.dragStartPositions.clear();
+        const boardData = MurderBoardData.getGlobalBoardData();
+        const itemsToTrack = new Set(this.selectedItems);
+        
+        // If any selected item is in a group, add all items in that group
         this.selectedItems.forEach(selectedId => {
-          const boardData = MurderBoardData.getBoardData(this.scene);
           const itemData = boardData.items.find(i => i.id === selectedId);
+          if (itemData && itemData.groupId) {
+            // Add all items in this group
+            boardData.items.forEach(grpItem => {
+              if (grpItem.groupId === itemData.groupId) {
+                itemsToTrack.add(grpItem.id);
+              }
+            });
+          }
+        });
+        
+        // Now save positions of all tracked items
+        itemsToTrack.forEach(trackedId => {
+          const itemData = boardData.items.find(i => i.id === trackedId);
           if (itemData) {
-            this.dragStartPositions.set(selectedId, { x: itemData.x, y: itemData.y });
+            this.dragStartPositions.set(trackedId, { x: itemData.x, y: itemData.y });
           }
         });
         
@@ -633,13 +883,68 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
 
+      // Handle rotation
+      if (this.isRotating && this.rotatingItem) {
+        // Calculate angle from center to current mouse position
+        const dx = x - this.rotateCenterX;
+        const dy = y - this.rotateCenterY;
+        const currentAngle = Math.atan2(dy, dx) * 180 / Math.PI;
+        
+        // Calculate angle from center to start position
+        const startDx = this.rotateStart.x - this.rotateCenterX;
+        const startDy = this.rotateStart.y - this.rotateCenterY;
+        const startAngle = Math.atan2(startDy, startDx) * 180 / Math.PI;
+        
+        // Calculate rotation delta
+        const angleDelta = currentAngle - startAngle;
+        let newRotation = (this.rotateStartAngle + angleDelta) % 360;
+        if (newRotation < 0) newRotation += 360;
+        
+        // Snap to 15 degree increments if shift is held
+        if (event.shiftKey) {
+          newRotation = Math.round(newRotation / 15) * 15;
+        }
+        
+        // Update cached item rotation directly (avoid recalculation)
+        this.rotatingItem.rotation = newRotation;
+        
+        // Use requestAnimationFrame to throttle draw calls during rotation
+        if (!this.rotationDrawPending) {
+          this.rotationDrawPending = true;
+          requestAnimationFrame(() => {
+            this.renderer.draw();
+            this.rotationDrawPending = false;
+          });
+        }
+        return;
+      }
+      
+      // Handle right-click panning (convert to isPanning when dragging)
+      if (this.isRightClickPanning) {
+        const panDeltaX = x - this.panStartX;
+        const panDeltaY = y - this.panStartY;
+        // If movement exceeds threshold, treat as pan
+        if (Math.abs(panDeltaX) > 5 || Math.abs(panDeltaY) > 5) {
+          this.isPanning = true;
+          this.rightClickPanned = true; // Mark that we actually panned
+        }
+      }
+
       // Handle panning
-      if (this.isPanning) {
+      if (this.isPanning && this.isRightClickPanning) {
         const panDeltaX = x - this.panStartX;
         const panDeltaY = y - this.panStartY;
         this.renderer.camera.x = this.panStartCameraX + panDeltaX;
         this.renderer.camera.y = this.panStartCameraY + panDeltaY;
-        this.renderer.draw();
+        
+        // Throttle draw calls during panning
+        if (!this.panDrawPending) {
+          this.panDrawPending = true;
+          requestAnimationFrame(() => {
+            this.renderer.draw();
+            this.panDrawPending = false;
+          });
+        }
         return;
       }
 
@@ -652,7 +957,15 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           x2: x,
           y2: y
         };
-        this.renderer.draw();
+        
+        // Throttle draw calls during box selection
+        if (!this.boxSelectDrawPending) {
+          this.boxSelectDrawPending = true;
+          requestAnimationFrame(() => {
+            this.renderer.draw();
+            this.boxSelectDrawPending = false;
+          });
+        }
         return;
       }
 
@@ -661,45 +974,134 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         const deltaX = x - this.resizeStart.x;
         const deltaY = y - this.resizeStart.y;
         
-        const boardData = MurderBoardData.getBoardData(this.scene);
+        const boardData = MurderBoardData.getGlobalBoardData();
+        // Apply migrations to ensure items have correct dimensions
+        this.renderer._migrateOldItemData(boardData);
         const item = boardData.items.find(i => i.id === this.resizeItemId);
-        if (item && item.type === 'Text') {
-          let newWidth = this.resizeStartDimensions.width;
-          let newHeight = this.resizeStartDimensions.height;
+        if (item) {
+          const zoomedDeltaX = deltaX / this.renderer.camera.zoom;
+          const zoomedDeltaY = deltaY / this.renderer.camera.zoom;
           
-          // Adjust dimensions based on handle
+          // Calculate the four corners of the original item
+          const originalLeft = this.resizeStartPosition.x;
+          const originalRight = this.resizeStartPosition.x + this.resizeStartDimensions.width;
+          const originalTop = this.resizeStartPosition.y;
+          const originalBottom = this.resizeStartPosition.y + this.resizeStartDimensions.height;
+          
+          // Dragged corner follows the mouse, opposite corner stays locked
+          let newLeft = originalLeft;
+          let newRight = originalRight;
+          let newTop = originalTop;
+          let newBottom = originalBottom;
+          
           switch (this.resizeHandle) {
-            case 'nw':
-              newWidth = this.resizeStartDimensions.width - deltaX / this.renderer.camera.zoom;
-              newHeight = this.resizeStartDimensions.height - deltaY / this.renderer.camera.zoom;
+            case 'nw': // Top-left dragged, bottom-right locked
+              newLeft = originalLeft + zoomedDeltaX;
+              newTop = originalTop + zoomedDeltaY;
               break;
-            case 'ne':
-              newWidth = this.resizeStartDimensions.width + deltaX / this.renderer.camera.zoom;
-              newHeight = this.resizeStartDimensions.height - deltaY / this.renderer.camera.zoom;
+            case 'ne': // Top-right dragged, bottom-left locked
+              newRight = originalRight + zoomedDeltaX;
+              newTop = originalTop + zoomedDeltaY;
               break;
-            case 'sw':
-              newWidth = this.resizeStartDimensions.width - deltaX / this.renderer.camera.zoom;
-              newHeight = this.resizeStartDimensions.height + deltaY / this.renderer.camera.zoom;
+            case 'sw': // Bottom-left dragged, top-right locked
+              newLeft = originalLeft + zoomedDeltaX;
+              newBottom = originalBottom + zoomedDeltaY;
               break;
-            case 'se':
-              newWidth = this.resizeStartDimensions.width + deltaX / this.renderer.camera.zoom;
-              newHeight = this.resizeStartDimensions.height + deltaY / this.renderer.camera.zoom;
+            case 'se': // Bottom-right dragged, top-left locked
+              newRight = originalRight + zoomedDeltaX;
+              newBottom = originalBottom + zoomedDeltaY;
               break;
           }
           
-          // Ensure minimum size
-          newWidth = Math.max(newWidth, 50);
-          newHeight = Math.max(newHeight, 30);
+          // Calculate new dimensions and position from the corners
+          let newWidth = Math.abs(newRight - newLeft);
+          let newHeight = Math.abs(newBottom - newTop);
+          let newX = Math.min(newLeft, newRight);
+          let newY = Math.min(newTop, newBottom);
+          
+          // Ensure minimum size and handle type-specific constraints
+          // For Image items, maintain aspect ratio based on actual image dimensions if available
+          if (item.type === 'Image') {
+            if (item.data?.imageUrl && this.renderer.imageCache.has(item.data.imageUrl)) {
+              const cachedImg = this.renderer.imageCache.get(item.data.imageUrl);
+              if (cachedImg) {
+                const imgAspect = cachedImg.width / cachedImg.height;
+                // Constrain to aspect ratio - user can resize either dimension, other adjusts automatically
+                // We'll use whichever changed more to determine the primary resize direction
+                const widthChange = Math.abs(newWidth - this.resizeStartDimensions.width);
+                const heightChange = Math.abs(newHeight - this.resizeStartDimensions.height);
+                
+                if (widthChange > heightChange) {
+                  // Width changed more, constrain height based on width
+                  newHeight = newWidth / imgAspect;
+                } else {
+                  // Height changed more, constrain width based on height
+                  newWidth = newHeight * imgAspect;
+                }
+                
+                // Adjust position to keep the dragged corner in place when aspect ratio forces adjustment
+                const widthDiff = newWidth - (newRight - newLeft);
+                const heightDiff = newHeight - (newBottom - newTop);
+                
+                if (this.resizeHandle === 'nw') {
+                  newLeft -= widthDiff;
+                  newTop -= heightDiff;
+                } else if (this.resizeHandle === 'ne') {
+                  newRight += widthDiff;
+                  newTop -= heightDiff;
+                } else if (this.resizeHandle === 'sw') {
+                  newLeft -= widthDiff;
+                  newBottom += heightDiff;
+                } else if (this.resizeHandle === 'se') {
+                  newRight += widthDiff;
+                  newBottom += heightDiff;
+                }
+                
+                newX = Math.min(newLeft, newRight);
+                newY = Math.min(newTop, newBottom);
+              }
+            }
+            // Apply minimum size for all images (cached or not)
+            newWidth = Math.max(newWidth, 30);
+            newHeight = Math.max(newHeight, 30);
+          } else if (item.type === 'Note') {
+            newWidth = Math.max(newWidth, 20);
+            newHeight = Math.max(newHeight, 20);
+          } else if (item.type === 'Document') {
+            newWidth = Math.max(newWidth, 40);
+            newHeight = Math.max(newHeight, 40);
+          } else {
+            newWidth = Math.max(newWidth, 30);
+            newHeight = Math.max(newHeight, 30);
+          }
           
           // Update item data
           if (!item.data) item.data = {};
           item.data.width = newWidth;
           item.data.height = newHeight;
+          item._migrationApplied = true;  // Mark as migrated so migration won't delete these dimensions
+          item.x = newX;
+          item.y = newY;
           
-          // Update the item in the scene
-          MurderBoardData.updateItem(this.scene, this.resizeItemId, { data: item.data });
+          // Update the cached board data immediately for visual feedback (no save yet)
+          if (this.renderer._currentBoardData) {
+            const cachedItem = this.renderer._currentBoardData.items.find(i => i.id === this.resizeItemId);
+            if (cachedItem) {
+              cachedItem.x = newX;
+              cachedItem.y = newY;
+              cachedItem.data = { ...cachedItem.data, ...item.data };
+              cachedItem._migrationApplied = true;
+            }
+          }
           
-          this.renderer.draw();
+          // Throttle draw calls during resizing
+          if (!this.resizeDrawPending) {
+            this.resizeDrawPending = true;
+            requestAnimationFrame(() => {
+              this.renderer.draw();
+              this.resizeDrawPending = false;
+            });
+          }
         }
         return;
       }
@@ -733,7 +1135,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           canConnect = targetAccepts && sourceAccepts;
         }
 
-        const boardData = MurderBoardData.getBoardData(this.scene);
+        const boardData = MurderBoardData.getGlobalBoardData();
 
         if (canConnect) {
           // Over another item with single selection - highlight for connection AND move the item
@@ -759,6 +1161,13 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
             }
           }
 
+          // Update connection label positions to follow their connections
+          // (but skip this if we're dragging a label item itself)
+          const isDraggingLabel = boardData.connections.some(c => c.labelItemId === firstSelectedId);
+          if (!isDraggingLabel) {
+            this._updateConnectionLabelPositions(boardData.items, boardData.connections);
+          }
+
           // Debounce scene flag updates - only update every 50ms during drag
           if (this.dragUpdateTimeout) {
             clearTimeout(this.dragUpdateTimeout);
@@ -779,12 +1188,29 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           this.dragOverItem = null;
           this.canvas.parentElement.style.cursor = 'move';
           
-          // Update all selected items, maintaining their relative positions
+          // Determine all items to move (including grouped items)
+          const itemsToMove = new Set(this.selectedItems);
+          
+          // For each selected item, if it's in a group, add all other items in that group
+          const boardData = MurderBoardData.getGlobalBoardData();
           this.selectedItems.forEach(selectedId => {
-            const itemIndex = boardData.items.findIndex(i => i.id === selectedId);
+            const selectedItem = boardData.items.find(i => i.id === selectedId);
+            if (selectedItem && selectedItem.groupId) {
+              // Add all items in this group
+              boardData.items.forEach(item => {
+                if (item.groupId === selectedItem.groupId) {
+                  itemsToMove.add(item.id);
+                }
+              });
+            }
+          });
+          
+          // Update all items to move, maintaining their relative positions
+          itemsToMove.forEach(itemId => {
+            const itemIndex = boardData.items.findIndex(i => i.id === itemId);
             if (itemIndex !== -1) {
               const item = boardData.items[itemIndex];
-              const startPos = this.dragStartPositions.get(selectedId);
+              const startPos = this.dragStartPositions.get(itemId);
               if (startPos) {
                 // Move item from its starting position + world delta
                 item.x = startPos.x + worldDeltaX;
@@ -793,18 +1219,25 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
             }
           });
 
-          // Debounce scene flag updates - only update every 50ms during drag
-          if (this.dragUpdateTimeout) {
-            clearTimeout(this.dragUpdateTimeout);
+          // Update connection label positions to follow their connections
+          // (but skip this if we're dragging a label item itself)
+          const isDraggingLabel = boardData.connections.some(c => c.labelItemId === firstSelectedId);
+          if (!isDraggingLabel) {
+            this._updateConnectionLabelPositions(boardData.items, boardData.connections);
           }
-          
-          this.dragUpdateTimeout = setTimeout(() => {
-            this._updateBoardItems(boardData.items);
-            this.dragUpdateTimeout = null;
-          }, 50);
+
+          // Don't save during drag - only update visual position
+          // Final save happens on mouse up for better performance
         }
 
-        this.renderer.draw();
+        // Throttle draw calls during dragging
+        if (!this.dragDrawPending) {
+          this.dragDrawPending = true;
+          requestAnimationFrame(() => {
+            this.renderer.draw();
+            this.dragDrawPending = false;
+          });
+        }
       }
 
       // Highlight item under cursor (if not dragging)
@@ -820,9 +1253,17 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           this.renderer.setHoverConnection(null);
         }
         
-        this.renderer.draw();
+        // Throttle draw calls for hover effects
+        if (!this.hoverDrawPending) {
+          this.hoverDrawPending = true;
+          requestAnimationFrame(() => {
+            this.renderer.draw();
+            this.hoverDrawPending = false;
+          });
+        }
       }
     } catch (error) {
+      console.error('Murder Board | Error in mouse move:', error);
     }
   }
 
@@ -842,8 +1283,79 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       const rect = this.canvas.getBoundingClientRect();
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
+      
+      // Handle rotation end
+      if (this.isRotating) {
+        const boardData = MurderBoardData.getGlobalBoardData();
+        const item = boardData.items.find(i => i.id === this.rotateItemId);
+        if (item) {
+          await MurderBoardData.updateItem(this.scene, item.id, { rotation: item.rotation });
+          await MurderBoardData.saveGlobalBoardData(boardData);
+          
+          // Emit socket message
+          if (this.socketHandler) {
+            this.socketHandler.emitSocketMessage({
+              action: 'updateItem',
+              sceneId: this.scene.id,
+              itemId: item.id,
+              itemData: { rotation: item.rotation },
+              userId: game.user.id
+            });
+          }
+        }
+        
+        this.isRotating = false;
+        this.rotateItemId = null;
+        this.rotatingItem = null;
+        this.rotateStart = null;
+        this.rotateStartAngle = null;
+        this.rotateCenterX = null;
+        this.rotateCenterY = null;
+        this.rotationDrawPending = false;
+        this.renderer.draw();
+        return;
+      }
 
-      // Stop panning
+      // Handle right-click release (either pan end or show context menu)
+      if (this.isRightClickPanning) {
+        this.isRightClickPanning = false;
+        
+        // If we were panning, stop and save
+        if (this.isPanning) {
+          this.isPanning = false;
+          this._debouncedSaveCameraState();
+          this.renderer.draw();
+          return;
+        }
+        
+        // Right-click without drag - show context menu on mouseup (not in contextmenu event)
+        // The contextmenu event will fire after this, and we'll suppress it since rightClickPanned is false
+        
+        // Clear all rendering state before showing menu
+        if (this.renderer) {
+          this.renderer.setHoverItem(null);
+          this.renderer.setHoverConnection(null);
+          this.renderer.connectionPreviewMode = false;
+          this.renderer.connectionTargetItem = null;
+          this.renderer.clearConnectionPreview();
+          this.renderer.draw();
+        }
+        
+        const item = this.renderer.getItemAtPoint(x, y);
+        if (item) {
+          this._showContextMenu(item, event.clientX, event.clientY);
+        } else {
+          const connection = this.renderer.getConnectionAtPoint(x, y);
+          if (connection) {
+            this._showConnectionMenu(connection, event.clientX, event.clientY);
+          } else {
+            this._showCreationMenu(x, y, event.clientX, event.clientY);
+          }
+        }
+        return;
+      }
+
+      // Stop panning (legacy middle-click - kept for backwards compatibility if needed)
       if (this.isPanning) {
         this.isPanning = false;
         // Save camera state after panning
@@ -874,6 +1386,21 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       // Stop resizing
       if (this.isResizing) {
         this.isResizing = false;
+        
+        // Save the final resized dimensions to database
+        if (this.resizeItemId && this.renderer._currentBoardData) {
+          const item = this.renderer._currentBoardData.items.find(i => i.id === this.resizeItemId);
+          if (item) {
+            // Save without awaiting to avoid blocking the UI
+            MurderBoardData.updateItem(this.scene, this.resizeItemId, { 
+              x: item.x, 
+              y: item.y, 
+              data: item.data, 
+              _migrationApplied: item._migrationApplied 
+            }).catch(err => console.error('Failed to save resize:', err));
+          }
+        }
+        
         this.resizeItemId = null;
         this.resizeHandle = null;
         this.renderer.draw();
@@ -910,7 +1437,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
             }
 
             // Reset item to original position (don't save the drag)
-            const boardData = MurderBoardData.getBoardData(this.scene);
+            const boardData = MurderBoardData.getGlobalBoardData();
             const item = boardData.items.find(i => i.id === firstSelectedId);
             if (item) {
               item.x = this.dragItemStartPos.x;
@@ -930,7 +1457,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
             }
             this._notify(errorMsg, 'error');
             // Reset item to original position on connection creation failure
-            const boardData = MurderBoardData.getBoardData(this.scene);
+            const boardData = MurderBoardData.getGlobalBoardData();
             const item = boardData.items.find(i => i.id === firstSelectedId);
             if (item) {
               item.x = this.dragItemStartPos.x;
@@ -940,7 +1467,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           }
         } else {
           // Check if any item was actually moved
-          const boardData = MurderBoardData.getBoardData(this.scene);
+          const boardData = MurderBoardData.getGlobalBoardData();
           const firstItem = boardData.items.find(i => i.id === firstSelectedId);
           
           if (firstItem) {
@@ -968,6 +1495,11 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
               
               // Save reordered items
               await this._updateBoardItems(reorderedItems);
+              
+              // Update label offsets for any connection labels that were moved
+              this.selectedItems.forEach(selectedId => {
+                this._updateConnectionLabelOffset(selectedId);
+              });
               
               // Emit socket message for multiplayer sync (only if player, GM updates directly)
               if (!game.user.isGM) {
@@ -1005,28 +1537,160 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         event.target.closest('.murder-board-btn') ||
         event.target.closest('button') ||
         event.target.closest('menu')) {
-      return;
+      return false;
+    }
+    
+    // If we performed an actual pan with right-click drag, suppress the context menu
+    if (this.rightClickPanned) {
+      this.rightClickPanned = false;
+      event.preventDefault();
+      event.stopPropagation();
+      return false;
+    }
+    
+    // Always prevent default and stop propagation for right-clicks on canvas
+    event.preventDefault();
+    event.stopPropagation();
+    return false;
+  }
+
+  /**
+   * Update menu display to reflect current item state (selected colors, values, etc.)
+   * @param {string} itemId - Item ID
+   * @private
+   */
+  _updateMenuDisplay(itemId) {
+    const menuDiv = document.querySelector('.murder-board-context-menu');
+    if (!menuDiv) return; // Menu not open
+
+    const item = MurderBoardData.getItem(this.scene, itemId);
+    if (!item) return;
+
+    // Update fastener buttons - mark current fastener as selected
+    const fastenerBtns = menuDiv.querySelectorAll('.murder-board-fastener-btn');
+    const currentFastener = item.data?.fastenerType || 'pushpin';
+    fastenerBtns.forEach(btn => {
+      if (btn.dataset.fastener === currentFastener) {
+        btn.classList.add('selected');
+      } else {
+        btn.classList.remove('selected');
+      }
+    });
+
+    // Update color buttons for documents
+    const docColorBtns = menuDiv.querySelectorAll('.murder-board-doc-color-btn');
+    docColorBtns.forEach(btn => {
+      if (btn.dataset.color === item.color) {
+        btn.classList.add('selected');
+      } else {
+        btn.classList.remove('selected');
+      }
+    });
+
+    // Update color buttons for notes
+    const noteColorBtns = menuDiv.querySelectorAll('.murder-board-note-color-btn');
+    noteColorBtns.forEach(btn => {
+      if (btn.dataset.color === item.color) {
+        btn.classList.add('selected');
+      } else {
+        btn.classList.remove('selected');
+      }
+    });
+
+    // Update font color buttons
+    const fontColorBtns = menuDiv.querySelectorAll('.murder-board-font-color-btn');
+    const currentTextColor = item.data?.textColor || '#000000';
+    fontColorBtns.forEach(btn => {
+      if (btn.dataset.color === currentTextColor) {
+        btn.classList.add('selected');
+      } else {
+        btn.classList.remove('selected');
+      }
+    });
+
+    // Update shadow buttons
+    const shadowBtns = menuDiv.querySelectorAll('.murder-board-shadow-btn');
+    const currentShadow = item.data?.shadow || 'default';
+    shadowBtns.forEach(btn => {
+      if (btn.dataset.shadow === currentShadow) {
+        btn.classList.add('selected');
+      } else {
+        btn.classList.remove('selected');
+      }
+    });
+
+    // Update border color buttons
+    const borderBtns = menuDiv.querySelectorAll('.murder-board-border-btn');
+    const currentBorder = item.data?.borderColor || 'white';
+    borderBtns.forEach(btn => {
+      if (btn.dataset.border === currentBorder) {
+        btn.classList.add('selected');
+      } else {
+        btn.classList.remove('selected');
+      }
+    });
+
+    // Update effect buttons
+    const effectBtns = menuDiv.querySelectorAll('.murder-board-doc-effect-btn');
+    const currentEffect = item.data?.effect || 'none';
+    effectBtns.forEach(btn => {
+      if (btn.dataset.effect === currentEffect) {
+        btn.classList.add('selected');
+      } else {
+        btn.classList.remove('selected');
+      }
+    });
+
+    // Update font select dropdown
+    const fontDropdown = menuDiv.querySelector('#font-select-dropdown');
+    if (fontDropdown) {
+      fontDropdown.value = item.data?.font || 'Arial';
     }
 
-    event.preventDefault();
-    if (!this.renderer) return;
+    // Update font size slider
+    const fontSizeSlider = menuDiv.querySelector('#font-size-slider');
+    if (fontSizeSlider) {
+      fontSizeSlider.value = item.data?.fontSize || 14;
+      const fontSizeValue = menuDiv.querySelector('#font-size-value');
+      if (fontSizeValue) {
+        fontSizeValue.textContent = (item.data?.fontSize || 14) + 'px';
+      }
+    }
 
-    const rect = this.canvas.getBoundingClientRect();
-    const screenX = event.clientX - rect.left;
-    const screenY = event.clientY - rect.top;
+    // Update effect intensity slider
+    const intensitySlider = menuDiv.querySelector('#effect-intensity-slider');
+    if (intensitySlider) {
+      intensitySlider.value = item.data?.effectIntensity || 1;
+      const intensityValue = menuDiv.querySelector('#effect-intensity-value');
+      if (intensityValue) {
+        intensityValue.textContent = (item.data?.effectIntensity || 1).toFixed(1);
+      }
+    }
 
-    const item = this.renderer.getItemAtPoint(screenX, screenY);
-    if (item) {
-      // Right-click on item - show item context menu
-      this._showContextMenu(item, event.clientX, event.clientY);
-    } else {
-      // Check if right-clicking on a connection
-      const connection = this.renderer.getConnectionAtPoint(screenX, screenY);
-      if (connection) {
-        this._showConnectionMenu(connection, event.clientX, event.clientY);
+    // Update effect seed slider
+    const seedSlider = menuDiv.querySelector('#effect-seed-slider');
+    if (seedSlider) {
+      seedSlider.value = item.data?.effectSeed || 50;
+      const seedValue = menuDiv.querySelector('#effect-seed-value');
+      if (seedValue) {
+        seedValue.textContent = (item.data?.effectSeed || 50);
+      }
+    }
+
+    // Update z-index display if present
+    const zindexDisplay = menuDiv.querySelector('#zindex-value');
+    if (zindexDisplay) {
+      zindexDisplay.textContent = (item.zIndex || 0).toFixed(1);
+    }
+
+    // Update connection acceptance toggle state if present
+    const connectionToggle = menuDiv.querySelector('.murder-board-connection-toggle-btn');
+    if (connectionToggle) {
+      const accepts = item.acceptsConnections !== false;
+      if (accepts) {
+        connectionToggle.classList.add('selected');
       } else {
-        // Right-click on empty space - show creation menu
-        this._showCreationMenu(screenX, screenY, event.clientX, event.clientY);
+        connectionToggle.classList.remove('selected');
       }
     }
   }
@@ -1063,7 +1727,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
               this._notify('Error editing item', 'error');
             }
           },
-          hidden: isMultiSelect, // Hide edit for multi-select
+          hidden: true, // Always hide - use context menu-based editing instead
         },
         {
           label: game.i18n.localize('MURDER_BOARD.UI.Duplicate'),
@@ -1094,22 +1758,257 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
             }
           },
         },
+        {
+          label: game.i18n.localize('MURDER_BOARD.UI.BringToFront') || 'Bring to Front',
+          icon: 'fas fa-arrow-up',
+          callback: () => {
+            try {
+              self._bringToFront(itemId);
+            } catch (error) {
+              console.error('Murder Board | Error bringing item to front:', error);
+              this._notify('Error bringing item to front', 'error');
+            }
+          },
+          hidden: isMultiSelect, // Hide for multi-select
+        },
+        {
+          label: game.i18n.localize('MURDER_BOARD.UI.BringForward') || 'Bring Forward',
+          icon: 'fas fa-chevron-up',
+          callback: () => {
+            try {
+              self._bringForward(itemId);
+            } catch (error) {
+              console.error('Murder Board | Error bringing item forward:', error);
+              this._notify('Error bringing item forward', 'error');
+            }
+          },
+          hidden: isMultiSelect, // Hide for multi-select
+        },
+        {
+          label: game.i18n.localize('MURDER_BOARD.UI.SendBackward') || 'Send Backward',
+          icon: 'fas fa-chevron-down',
+          callback: () => {
+            try {
+              self._sendBackward(itemId);
+            } catch (error) {
+              console.error('Murder Board | Error sending item backward:', error);
+              this._notify('Error sending item backward', 'error');
+            }
+          },
+          hidden: isMultiSelect, // Hide for multi-select
+        },
+        {
+          label: game.i18n.localize('MURDER_BOARD.UI.SendToBack') || 'Send to Back',
+          icon: 'fas fa-arrow-down',
+          callback: () => {
+            try {
+              self._sendToBack(itemId);
+            } catch (error) {
+              console.error('Murder Board | Error sending item to back:', error);
+              this._notify('Error sending item to back', 'error');
+            }
+          },
+          hidden: isMultiSelect, // Hide for multi-select
+        },
+        {
+          label: isMultiSelect ? `Group ${this.selectedItems.length} Items` : 'Add to Group',
+          icon: 'fas fa-object-group',
+          callback: () => {
+            try {
+              if (isMultiSelect && self.selectedItems.length >= 2) {
+                self._createGroup();
+              }
+            } catch (error) {
+              console.error('Murder Board | Error grouping items:', error);
+              this._notify('Error grouping items', 'error');
+            }
+          },
+          hidden: !isMultiSelect || this.selectedItems.length < 2, // Show only for multi-select with 2+ items
+        },
+        {
+          label: 'Ungroup',
+          icon: 'fas fa-object-ungroup',
+          callback: () => {
+            try {
+              // Check if this item is part of a group
+              if (item.groupId) {
+                self._ungroup(item.groupId);
+              }
+            } catch (error) {
+              console.error('Murder Board | Error ungrouping:', error);
+              this._notify('Error ungrouping', 'error');
+            }
+          },
+          hidden: isMultiSelect || !item.groupId, // Show only for single grouped items
+        },
+        {
+          label: 'Group to Front',
+          icon: 'fas fa-arrow-up',
+          callback: () => {
+            try {
+              if (item.groupId) {
+                self._bringGroupToFront(item.groupId);
+              }
+            } catch (error) {
+              console.error('Murder Board | Error bringing group to front:', error);
+              this._notify('Error bringing group to front', 'error');
+            }
+          },
+          hidden: isMultiSelect || !item.groupId, // Show only for single grouped items
+        },
+        {
+          label: 'Group to Back',
+          icon: 'fas fa-arrow-down',
+          callback: () => {
+            try {
+              if (item.groupId) {
+                self._sendGroupToBack(item.groupId);
+              }
+            } catch (error) {
+              console.error('Murder Board | Error sending group to back:', error);
+              this._notify('Error sending group to back', 'error');
+            }
+          },
+          hidden: isMultiSelect || !item.groupId, // Show only for single grouped items
+        },
+        {
+          label: game.i18n.localize('MURDER_BOARD.UI.EditText') || 'Edit Text',
+          icon: 'fas fa-pen-to-square',
+          callback: () => {
+            try {
+              self._editItemContent(itemId);
+            } catch (error) {
+              console.error('Murder Board | Error editing item content:', error);
+              this._notify('Error editing item', 'error');
+            }
+          },
+          hidden: isMultiSelect || (item.type !== 'Text' && item.type !== 'Note' && item.type !== 'Document'),
+        },
+        {
+          label: game.i18n.localize('MURDER_BOARD.UI.EditImage') || 'Edit Image',
+          icon: 'fas fa-image',
+          callback: () => {
+            try {
+              self._editImageUrl(itemId);
+            } catch (error) {
+              console.error('Murder Board | Error editing image:', error);
+              this._notify('Error editing image', 'error');
+            }
+          },
+          hidden: isMultiSelect || item.type !== 'Image',
+        },
       ];
 
       // Create custom context menu HTML
       let html = '<div class="murder-board-context-menu" style="min-width: 150px;">';
-      let menuItemsHtml = ''; // Store menu items to add at the end
       
-      // Collect menu items HTML (to add at the bottom later)
+      // Add z-index control buttons at the top (if not multi-select)
+      if (!isMultiSelect) {
+        const currentZIndex = item.zIndex || 0;
+        html += `<div class="murder-board-zindex-controls" style="display: flex; gap: 4px; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid rgba(0,0,0,0.2); align-items: center;">`;
+        
+        // Bring to Front button
+        const bringToFrontIdx = menuItems.findIndex(m => m.label.includes('Bring to Front'));
+        html += `<button class="murder-board-zindex-btn" data-callback="${bringToFrontIdx}" title="Bring to Front">
+          <i class="fas fa-arrow-up"></i>
+        </button>`;
+        
+        // Bring Forward button
+        const bringForwardIdx = menuItems.findIndex(m => m.label.includes('Bring Forward'));
+        html += `<button class="murder-board-zindex-btn" data-callback="${bringForwardIdx}" title="Bring Forward">
+          <i class="fas fa-chevron-up"></i>
+        </button>`;
+        
+        // Send Backward button
+        const sendBackwardIdx = menuItems.findIndex(m => m.label.includes('Send Backward'));
+        html += `<button class="murder-board-zindex-btn" data-callback="${sendBackwardIdx}" title="Send Backward">
+          <i class="fas fa-chevron-down"></i>
+        </button>`;
+        
+        // Send to Back button
+        const sendToBackIdx = menuItems.findIndex(m => m.label.includes('Send to Back'));
+        html += `<button class="murder-board-zindex-btn" data-callback="${sendToBackIdx}" title="Send to Back">
+          <i class="fas fa-arrow-down"></i>
+        </button>`;
+        
+        // Z-index display
+        html += `<div class="murder-board-zindex-display" style="margin-left: auto; padding: 0 8px; font-size: 12px; color: var(--mb-secondary); font-weight: bold; white-space: nowrap;">
+          Z: <span id="zindex-value">${currentZIndex.toFixed(1)}</span>
+        </div>`;
+        
+        html += `</div>`;
+      }
+      
+      // Add edit buttons section - collect first
+      let editItemsHtmlEarly = '';
       for (let menuItem of menuItems) {
-        if (!menuItem.hidden) {
-          menuItemsHtml += `
+        if (!menuItem.hidden && menuItem.label.includes('Edit')) {
+          editItemsHtmlEarly += `
             <button class="murder-board-menu-item" data-callback="${menuItems.indexOf(menuItem)}">
               <i class="${menuItem.icon}"></i>
               ${menuItem.label}
             </button>
           `;
         }
+      }
+      
+      // Add edit section right after z-index if it exists
+      if (editItemsHtmlEarly) {
+        html += `<div style="display: flex; gap: 4px; padding: 8px 12px; border-bottom: 1px solid var(--mb-dialog-input-border);">`;
+        html += editItemsHtmlEarly;
+        html += `</div>`;
+      }
+      
+      let menuItemsHtml = ''; // Store menu items to add at the end
+      let groupItemsHtml = ''; // Store group items separately
+      let editItemsHtml = ''; // Store edit buttons (Edit Text, Edit Image)
+      let connectionToggleHtml = ''; // Store connection toggle button
+      
+      // Add connection toggle as icon-only button (for non-multi-select)
+      if (!isMultiSelect) {
+        const acceptsConnections = item.acceptsConnections !== false;
+        connectionToggleHtml = `
+          <button class="murder-board-connection-toggle-btn ${acceptsConnections ? 'active' : ''}" data-item-id="${itemId}"
+                  title="${acceptsConnections ? 'Accepting Connections' : 'Rejecting Connections'}"
+                  style="width: 32px; padding: 6px;">
+            <i class="fas ${acceptsConnections ? 'fa-link' : 'fa-link-slash'}"></i>
+          </button>
+        `;
+      }
+      
+      // Collect menu items HTML (excluding z-index items for single select)
+      for (let menuItem of menuItems) {
+        if (!menuItem.hidden && !menuItem.label.includes('Bring') && !menuItem.label.includes('Send') && !menuItem.label.includes('Group') && menuItem.label !== 'Ungroup' && !menuItem.label.includes('Edit')) {
+          menuItemsHtml += `
+            <button class="murder-board-menu-item" data-callback="${menuItems.indexOf(menuItem)}">
+              <i class="${menuItem.icon}"></i>
+              ${menuItem.label}
+            </button>
+          `;
+        } else if (!menuItem.hidden && (menuItem.label.includes('Group') || menuItem.label === 'Ungroup')) {
+          // Collect group-related items to a separate section
+          groupItemsHtml += `
+            <button class="murder-board-menu-item" data-callback="${menuItems.indexOf(menuItem)}">
+              <i class="${menuItem.icon}"></i>
+              ${menuItem.label}
+            </button>
+          `;
+        } else if (!menuItem.hidden && menuItem.label.includes('Edit')) {
+          // Collect edit buttons to their own section
+          editItemsHtml += `
+            <button class="murder-board-menu-item" data-callback="${menuItems.indexOf(menuItem)}">
+              <i class="${menuItem.icon}"></i>
+              ${menuItem.label}
+            </button>
+          `;
+        }
+      }
+      
+      // Add group items on their own line if any exist
+      if (groupItemsHtml) {
+        html += `<div style="display: flex; gap: 4px; margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(0,0,0,0.2);">
+          ${groupItemsHtml}
+        </div>`;
       }
       
       // Add bulk fastener options for multi-select if any selected items are Image or Document
@@ -1141,19 +2040,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           html += `</div>`;
         }
       } else {
-        // Connection acceptance toggle for all item types
-        const acceptsConnections = item.acceptsConnections !== false;
-        html += `<div class="murder-board-context-section">`;
-        html += `
-          <button class="murder-board-connection-toggle-btn ${acceptsConnections ? 'active' : ''}" data-item-id="${itemId}"
-                  title="${acceptsConnections ? 'Rejecting Connections' : 'Accepting Connections'}">
-            <i class="fas ${acceptsConnections ? 'fa-link' : 'fa-link-slash'}"></i>
-            ${acceptsConnections ? 'Accepting Connections' : 'Rejecting Connections'}
-          </button>
-        `;
-        html += `</div>`;
-
-        // Add fastener type buttons for Image and Document items
+        // Add fastener type buttons for Image and Document items (connection toggle moved to bottom)
         if (item.type === 'Image' || item.type === 'Document') {
           const fastenerTypes = [
             { id: 'none', icon: 'fas fa-ban', label: 'None' },
@@ -1204,31 +2091,8 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         html += `</div></div>`;
       }
 
-      // Add size buttons for Document items
+      // Add effects buttons for Documents
       if (item.type === 'Document') {
-        const documentSizes = [
-          { id: 'small', label: 'Small' },
-          { id: 'medium', label: 'Medium' },
-          { id: 'large', label: 'Large' },
-          { id: 'xlarge', label: 'X-Large' },
-        ];
-        const currentSize = item.data?.size || 'medium';
-        html += `<div class="murder-board-context-section" style="display: flex; align-items: center; gap: 8px;">`;
-        html += `<div class="murder-board-context-section-label" style="margin-bottom: 0; flex-shrink: 0;">Size</div>`;
-        html += `<div style="display: flex; gap: 4px; flex-wrap: wrap; flex: 1;">`;
-        
-        for (let size of documentSizes) {
-          const isSelected = currentSize === size.id;
-          html += `
-            <button class="murder-board-doc-size-btn ${isSelected ? 'selected' : ''}" data-size="${size.id}"
-                    title="${size.label}">
-              ${size.label}
-            </button>
-          `;
-        }
-        html += `</div></div>`;
-
-        // Add effects buttons for Documents
         const documentEffects = [
           { id: 'none', label: 'None' },
           { id: 'crumpled', label: 'Crumpled' },
@@ -1290,46 +2154,11 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         ];
         
         const currentDocColor = item.color || '#FFFEF5';
-        html += `<div class="murder-board-context-section" style="display: flex; align-items: center; gap: 8px;">`;
-        html += `<div class="murder-board-context-section-label" style="margin-bottom: 0; flex-shrink: 0;">Color</div>`;
-        html += `<div style="display: flex; gap: 4px; flex-wrap: wrap; flex: 1;">`;
-        
-        for (let docColor of documentColors) {
-          const isSelected = docColor.hex.toUpperCase() === currentDocColor.toUpperCase();
-          html += `
-            <button class="murder-board-doc-color-btn ${isSelected ? 'selected' : ''}" data-color="${docColor.hex}"
-                    style="flex: 1; min-width: 30px; height: 30px; padding: 0; background: ${docColor.hex}; border: ${isSelected ? '3px solid var(--mb-secondary)' : '2px solid var(--mb-border)'};"
-                    title="${docColor.label}">
-            </button>
-          `;
-        }
-        html += `</div></div>`;
+        html += this._buildCompactColorPicker('Color', documentColors, currentDocColor, 'murder-board-doc-color-btn');
       }
 
       // Add size buttons for Image items
       if (item.type === 'Image') {
-        const imageSizes = [
-          { id: 'portrait', label: 'Polaroid' },
-          { id: 'small', label: 'Small' },
-          { id: 'medium', label: 'Medium' },
-          { id: 'large', label: 'Large' },
-          { id: 'xl', label: 'XL' },
-          { id: 'xxl', label: 'XXL' },
-        ];
-        const currentSize = item.data?.preset || 'medium';
-        html += `<div class="murder-board-context-section">`;
-        
-        for (let size of imageSizes) {
-          const isSelected = currentSize === size.id;
-          html += `
-            <button class="murder-board-size-btn ${isSelected ? 'selected' : ''}" data-size="${size.id}"
-                    title="${size.label}">
-              ${size.label}
-            </button>
-          `;
-        }
-        html += `</div>`;
-
         // Add border color buttons for Image items
         const borderColors = [
           { id: 'white', label: 'White', color: '#ffffff' },
@@ -1366,20 +2195,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         ];
         
         const currentNoteColor = item.color || '#FFFF00';
-        html += `<div class="murder-board-context-section" style="display: flex; align-items: center; gap: 8px;">`;
-        html += `<div class="murder-board-context-section-label" style="margin-bottom: 0; flex-shrink: 0;">Note</div>`;
-        html += `<div style="display: flex; gap: 4px; flex-wrap: wrap; flex: 1;">`;
-        
-        for (let noteColor of noteColors) {
-          const isSelected = noteColor.hex.toUpperCase() === currentNoteColor.toUpperCase();
-          html += `
-            <button class="murder-board-note-color-btn ${isSelected ? 'selected' : ''}" data-color="${noteColor.hex}"
-                    style="flex: 1; min-width: 30px; height: 30px; padding: 0; --color-value: ${noteColor.hex}; background: var(--color-value); border: ${isSelected ? '3px solid var(--mb-secondary)' : '2px solid var(--mb-border)'};"
-                    title="${noteColor.label}">
-            </button>
-          `;
-        }
-        html += `</div></div>`;
+        html += this._buildCompactColorPicker('Note', noteColors, currentNoteColor, 'murder-board-note-color-btn');
       }
 
       // Add font color swatches for Note and Text items
@@ -1396,37 +2212,11 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         ];
         
         const currentFontColor = (item.data && item.data.textColor) || '#000000';
-        html += `<div class="murder-board-context-section" style="display: flex; align-items: center; gap: 8px;">`;
-        html += `<div class="murder-board-context-section-label" style="margin-bottom: 0; flex-shrink: 0;">${item.type === 'Text' ? 'Text' : 'Font'}</div>`;
-        html += `<div style="display: flex; gap: 4px; flex-wrap: wrap; flex: 1;">`;
-        
-        for (let fontColor of fontColors) {
-          const isSelected = fontColor.hex.toUpperCase() === currentFontColor.toUpperCase();
-          html += `
-            <button class="murder-board-font-color-btn ${isSelected ? 'selected' : ''}" data-color="${fontColor.hex}"
-                    style="flex: 1; min-width: 30px; height: 30px; padding: 0; background: ${fontColor.hex}; border: ${isSelected ? '3px solid var(--mb-secondary)' : '2px solid var(--mb-border)'};"
-                    title="${fontColor.label}">
-            </button>
-          `;
-        }
-        html += `</div></div>`;
+        const fontLabel = item.type === 'Text' ? 'Text' : 'Font';
+        html += this._buildCompactColorPicker(fontLabel, fontColors, currentFontColor, 'murder-board-font-color-btn');
       }
 
-      // Add font size slider for Text items
-      if (item.type === 'Text') {
-        const currentFontSize = (item.data && item.data.fontSize) || 14;
-        html += `<div class="murder-board-context-section" style="padding: 8px 12px; border-bottom: 1px solid var(--mb-border);">`;
-        html += `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px;">`;
-        html += `<label style="font-size: 11px; color: var(--mb-text); white-space: nowrap;">Font Size:</label>`;
-        html += `<span id="font-size-value" style="font-size: 11px; color: var(--mb-text); font-weight: bold; min-width: 25px;">${currentFontSize}px</span>`;
-        html += `</div>`;
-        html += `<input type="range" id="font-size-slider" class="murder-board-font-slider"`;
-        html += ` min="8" max="72" value="${currentFontSize}" step="1"`;
-        html += ` style="width: 100%; cursor: pointer;">`;
-        html += `</div>`;
-      }
-      
-      // Add shadow option for all items
+      // Attach click handlers for menu items
       const shadowOptions = [
         { id: 'none', label: 'No Shadow' },
         { id: 'default', label: 'Shadow' },
@@ -1445,9 +2235,27 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         `;
       }
       html += `</div></div>`;
+
+      // Add font select dropdown for Note, Text, and Document items (not Image, since it doesn't display text)
+      if (item.type === 'Note' || item.type === 'Text' || item.type === 'Document') {
+        const currentFont = item.data?.font || 'Arial';
+        const availableFonts = this._getAvailableFonts();
+        
+        html += `<div class="murder-board-context-section" style="padding: 8px 12px; border-bottom: 1px solid var(--mb-border);">`;
+        html += `<select id="font-select-dropdown" class="murder-board-font-select" style="width: 100%; padding: 4px; border: 1px solid var(--mb-dialog-input-border); border-radius: 3px; background: var(--mb-dialog-input-bg); color: var(--mb-text); font-size: 11px; cursor: pointer;">`;
+        
+        for (let fontOption of availableFonts) {
+          const isSelected = fontOption.value === currentFont;
+          html += `<option value="${fontOption.value}" ${isSelected ? 'selected' : ''}>${fontOption.label}</option>`;
+        }
+        
+        html += `</select>`;
+        html += `</div>`;
+      }
       
-      // Add menu items at the end (Edit, Duplicate, Delete)
+      // Add menu items at the end (Connection Toggle, Duplicate, Delete)
       html += `<div style="display: flex; gap: 4px; flex-wrap: wrap; padding: 8px 12px; border-top: 1px solid var(--mb-dialog-input-border);">`;
+      html += connectionToggleHtml; // Add connection toggle first on the left
       html += menuItemsHtml;
       html += `</div></div>`;
 
@@ -1498,13 +2306,27 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
             // Single item fastener change
             // Get fresh item data to avoid stale closures
             const freshItem = MurderBoardData.getItem(self.scene, itemId);
-            if (!freshItem) return;
+            if (!freshItem) {
+              console.error(`Murder Board | Fastener handler: Item not found for ID ${itemId}`);
+              return;
+            }
+            
+            console.log(`Murder Board | Setting fastener on item ${itemId}:`, {
+              currentType: freshItem.data?.fastenerType,
+              newType: fastenerType,
+              itemData: freshItem.data,
+            });
+            
             MurderBoardData.updateItem(self.scene, itemId, {
               data: {
                 ...freshItem.data,
                 fastenerType: fastenerType,
               },
-            }).then(() => {
+            }).then((updatedItem) => {
+              console.log(`Murder Board | Fastener update completed:`, {
+                itemId,
+                updatedItem,
+              });
               emitSocketMessage('updateItem', {
                 sceneId: self.scene.id,
                 itemId: itemId,
@@ -1516,6 +2338,11 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
                 },
               });
               self.renderer.draw();
+              // Update menu display to show new state
+              self._updateMenuDisplay(itemId);
+            }).catch(err => {
+              console.error(`Murder Board | Fastener update failed:`, err);
+              self._notify(`Error updating fastener: ${err.message}`, 'error');
             });
           }
         });
@@ -1537,11 +2364,11 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           if (newState) {
             connectionToggleBtn.classList.add('active');
             connectionToggleBtn.title = 'Accepting Connections';
-            connectionToggleBtn.innerHTML = '<i class="fas fa-link"></i> Accepting Connections';
+            connectionToggleBtn.innerHTML = '<i class="fas fa-link"></i>';
           } else {
             connectionToggleBtn.classList.remove('active');
             connectionToggleBtn.title = 'Rejecting Connections';
-            connectionToggleBtn.innerHTML = '<i class="fas fa-link-slash"></i> Rejecting Connections';
+            connectionToggleBtn.innerHTML = '<i class="fas fa-link-slash"></i>';
           }
           
           MurderBoardData.updateItem(self.scene, itemId, {
@@ -1592,37 +2419,6 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       });
 
       // Attach size button handlers for Image items
-      const sizeBtns = menuDiv.querySelectorAll('.murder-board-size-btn');
-      sizeBtns.forEach((btn) => {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          const sizePreset = btn.dataset.size;
-          // Get fresh item data to avoid stale closures
-          const freshItem = MurderBoardData.getItem(self.scene, itemId);
-          if (!freshItem) return;
-          MurderBoardData.updateItem(self.scene, itemId, {
-            data: {
-              ...freshItem.data,
-              preset: sizePreset,
-            },
-          }).then(() => {
-            if (!game.user.isGM) {
-              emitSocketMessage('updateItem', {
-                sceneId: self.scene.id,
-                itemId: itemId,
-                updates: {
-                  data: {
-                    ...freshItem.data,
-                    preset: sizePreset,
-                  },
-                },
-              });
-            }
-            self.renderer.draw();
-          });
-        });
-      });
-
       // Attach document size button handlers for Document items
       const docSizeBtns = menuDiv.querySelectorAll('.murder-board-doc-size-btn');
       docSizeBtns.forEach((btn) => {
@@ -1672,6 +2468,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
               });
             }
             self.renderer.draw();
+            self._updateMenuDisplay(itemId);
           });
         });
       });
@@ -1716,6 +2513,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
               });
             }
             self.renderer.draw();
+            self._updateMenuDisplay(itemId);
           });
         });
       });
@@ -1763,6 +2561,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
               });
             }
             self.renderer.draw();
+            self._updateMenuDisplay(itemId);
           });
         });
       }
@@ -1810,6 +2609,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
               });
             }
             self.renderer.draw();
+            self._updateMenuDisplay(itemId);
           });
         });
       }
@@ -1842,6 +2642,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
               });
             }
             self.renderer.draw();
+            self._updateMenuDisplay(itemId);
           });
         });
       });
@@ -1863,6 +2664,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
               });
             }
             self.renderer.draw();
+            self._updateMenuDisplay(itemId);
           });
         });
       });
@@ -1895,6 +2697,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
               });
             }
             self.renderer.draw();
+            self._updateMenuDisplay(itemId);
           });
         });
       });
@@ -1927,83 +2730,48 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
               });
             }
             self.renderer.draw();
+            self._updateMenuDisplay(itemId);
           });
         });
       });
 
-      // Attach font size slider handler for Text items
-      const fontSizeSlider = menuDiv.querySelector('#font-size-slider');
-      if (fontSizeSlider) {
-        fontSizeSlider.addEventListener('input', (e) => {
+      // Attach font select dropdown handler
+      const fontSelectDropdown = menuDiv.querySelector('#font-select-dropdown');
+      if (fontSelectDropdown) {
+        // Prevent clicks from closing the context menu
+        fontSelectDropdown.addEventListener('mousedown', (e) => {
           e.stopPropagation();
-          const fontSize = parseInt(e.target.value);
-          
-          // Update display value
-          const valueDisplay = menuDiv.querySelector('#font-size-value');
-          if (valueDisplay) {
-            valueDisplay.textContent = fontSize + 'px';
-          }
-          
-          // Calculate new text dimensions to check if we need to resize the bounding box
-          const font = item.data?.font || 'Arial';
-          const text = item.label || '';
-          
-          // Create a temporary canvas context to measure text
-          const tempCanvas = document.createElement('canvas');
-          const tempCtx = tempCanvas.getContext('2d');
-          tempCtx.font = `${fontSize}px ${font}`;
-          
-          // Measure text dimensions
-          const textMetrics = tempCtx.measureText(text);
-          const textWidth = textMetrics.width;
-          const textHeight = fontSize * 1.3; // Approximate line height
-          
-          // Get current bounding box dimensions
-          let currentWidth = item.data?.width || this.renderer.itemSize;
-          let currentHeight = item.data?.height || this.renderer.itemSize;
-          
-          // Add padding for the text
-          const padding = 16; // 8px on each side
-          const neededWidth = textWidth + padding;
-          const neededHeight = textHeight + padding;
-          
-          // Auto-resize if text would exceed current bounds
-          let newWidth = currentWidth;
-          let newHeight = currentHeight;
-          
-          if (neededWidth > currentWidth) {
-            newWidth = Math.ceil(neededWidth);
-          }
-          if (neededHeight > currentHeight) {
-            newHeight = Math.ceil(neededHeight);
-          }
-          
-          // Save font size and potentially resized dimensions to item
-          const updateData = {
-            ...item.data,
-            fontSize: fontSize,
-          };
-          
-          if (newWidth !== currentWidth) {
-            updateData.width = newWidth;
-          }
-          if (newHeight !== currentHeight) {
-            updateData.height = newHeight;
-          }
-          
+        });
+        fontSelectDropdown.addEventListener('click', (e) => {
+          e.stopPropagation();
+        });
+        
+        fontSelectDropdown.addEventListener('change', (e) => {
+          e.stopPropagation();
+          const selectedFont = e.target.value;
+          // Get fresh item data to avoid stale closures
+          const freshItem = MurderBoardData.getItem(self.scene, itemId);
+          if (!freshItem) return;
           MurderBoardData.updateItem(self.scene, itemId, {
-            data: updateData,
+            data: {
+              ...freshItem.data,
+              font: selectedFont,
+            },
           }).then(() => {
             if (!game.user.isGM) {
               emitSocketMessage('updateItem', {
                 sceneId: self.scene.id,
                 itemId: itemId,
                 updates: {
-                  data: updateData,
+                  data: {
+                    ...freshItem.data,
+                    font: selectedFont,
+                  },
                 },
               });
             }
             self.renderer.draw();
+            self._updateMenuDisplay(itemId);
           });
         });
       }
@@ -2021,12 +2789,39 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         });
       });
 
+      // Attach click handlers for z-index buttons (keep menu open)
+      const zindexBtns = menuDiv.querySelectorAll('.murder-board-zindex-btn');
+      zindexBtns.forEach((element) => {
+        element.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const callbackIndex = parseInt(element.dataset.callback);
+          if (menuItems[callbackIndex] && menuItems[callbackIndex].callback) {
+            menuItems[callbackIndex].callback();
+          }
+          // Update z-index display after the operation completes
+          setTimeout(() => {
+            const updatedItem = MurderBoardData.getItem(self.scene, itemId);
+            if (updatedItem) {
+              const zindexDisplay = menuDiv.querySelector('#zindex-value');
+              if (zindexDisplay) {
+                zindexDisplay.textContent = (updatedItem.zIndex || 0).toFixed(1);
+              }
+            }
+          }, 50);
+          // Don't close menu - allows rapid adjustments
+        });
+      });
+
       // Remove menu when clicking elsewhere - close ALL context menus
       const closeMenu = (e) => {
         if (!menuDiv.contains(e.target)) {
           // Close all context menus, not just this one
           document.querySelectorAll('.murder-board-context-menu').forEach(menu => menu.remove());
           document.removeEventListener('click', closeMenu);
+          // Redraw canvas to clear any artifacts
+          if (self.renderer) {
+            self.renderer.draw();
+          }
         }
       };
       document.addEventListener('click', closeMenu);
@@ -2038,6 +2833,10 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           document.querySelectorAll('.murder-board-context-menu').forEach(menu => menu.remove());
           document.removeEventListener('keydown', closeOnEscape);
           document.removeEventListener('click', closeMenu);
+          // Redraw canvas to clear any artifacts
+          if (self.renderer) {
+            self.renderer.draw();
+          }
         }
       };
       document.addEventListener('keydown', closeOnEscape);
@@ -2051,7 +2850,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
    * @param {string} itemId - Item ID to duplicate
    */
   async _duplicateItem(itemId) {
-    const boardData = MurderBoardData.getBoardData(this.scene);
+    const boardData = MurderBoardData.getGlobalBoardData();
     const item = boardData.items.find(i => i.id === itemId);
     
     if (!item) {
@@ -2111,7 +2910,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           icon: 'fas fa-sticky-note',
           callback: () => {
             try {
-              self._showItemDialog('note', worldCoords);
+              self._createItemAtLocation('Note', worldCoords.x, worldCoords.y);
             } catch (error) {
               console.error('Murder Board | Error creating note:', error);
               this._notify('Error creating note', 'error');
@@ -2123,7 +2922,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           icon: 'fas fa-font',
           callback: () => {
             try {
-              self._showItemDialog('text', worldCoords);
+              self._createItemAtLocation('Text', worldCoords.x, worldCoords.y);
             } catch (error) {
               console.error('Murder Board | Error creating text:', error);
               this._notify('Error creating text', 'error');
@@ -2135,7 +2934,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           icon: 'fas fa-image',
           callback: () => {
             try {
-              self._showItemDialog('image', worldCoords);
+              self._createItemAtLocation('Image', worldCoords.x, worldCoords.y);
             } catch (error) {
               console.error('Murder Board | Error creating image:', error);
               this._notify('Error creating image', 'error');
@@ -2147,7 +2946,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           icon: 'fas fa-tag',
           callback: () => {
             try {
-              self._showItemDialog('document', worldCoords);
+              self._createItemAtLocation('Document', worldCoords.x, worldCoords.y);
             } catch (error) {
               console.error('Murder Board | Error creating document:', error);
               this._notify('Error creating document', 'error');
@@ -2198,6 +2997,10 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         if (!menuDiv.contains(e.target)) {
           document.querySelectorAll('.murder-board-context-menu').forEach(menu => menu.remove());
           document.removeEventListener('click', closeMenu);
+          // Redraw canvas to clear any artifacts
+          if (this.renderer) {
+            this.renderer.draw();
+          }
         }
       };
       document.addEventListener('click', closeMenu);
@@ -2208,6 +3011,10 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           document.querySelectorAll('.murder-board-context-menu').forEach(menu => menu.remove());
           document.removeEventListener('keydown', closeOnEscape);
           document.removeEventListener('click', closeMenu);
+          // Redraw canvas to clear any artifacts
+          if (this.renderer) {
+            this.renderer.draw();
+          }
         }
       };
       document.addEventListener('keydown', closeOnEscape);
@@ -2247,58 +3054,38 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
 
       const currentColor = connection.color || '#FF0000';
 
-      // Create custom context menu HTML
-      let html = '<div class="murder-board-context-menu">';
+      // Create custom context menu HTML - use class-based styling
+      let html = '<div class="murder-board-context-menu" style="left: ' + pageX + 'px; top: ' + pageY + 'px;">';
       
-      // Add color swatches row
-      html += `<div style="padding: 8px 12px; border-bottom: 1px solid #444; display: flex; gap: 4px; flex-wrap: wrap;">`;
-      for (let colorOpt of colors) {
-        const isSelected = colorOpt.hex.toUpperCase() === currentColor.toUpperCase();
+      // Add color swatches using compact color picker
+      const colorSwatches = colors.map(c => ({ hex: c.hex, label: c.label }));
+      html += this._buildCompactColorPicker('Color', colorSwatches, currentColor, 'murder-board-connection-color-btn');
+      // Add create label option (only if no label exists)
+      const hasLabel = connection.labelItemId ? true : false;
+      if (!hasLabel) {
         html += `
-          <button class="murder-board-connection-color-btn" data-color="${colorOpt.hex}"
-                  style="flex: 0 0 30px; height: 30px; padding: 0; cursor: pointer;
-                         border: ${isSelected ? '3px solid #333' : '1px solid #ccc'}; 
-                         background: ${colorOpt.hex};
-                         border-radius: 3px; transition: all 0.2s;"
-                  title="${colorOpt.label}">
-          </button>
+          <div class="murder-board-context-create-label-btn" style="padding: 8px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; color: #fff; background: #333; border-bottom: 1px solid #444;"
+               onmouseover="this.style.backgroundColor='#444'" 
+               onmouseout="this.style.backgroundColor='#333'">
+            <i class="fas fa-plus" style="color: #fff;"></i>
+            <span>Create Label</span>
+          </div>
         `;
       }
-      html += `</div>`;
 
-      // Add width options
-      const widthOptions = [
-        { id: 'thin', label: 'Thin', width: 4 },
-        { id: 'medium', label: 'Medium', width: 8 },
-        { id: 'thick', label: 'Thick', width: 12 },
-      ];
-      const currentWidth = connection.width || 2;
-      html += `<div style="padding: 8px 12px; border-bottom: 1px solid #444; display: flex; gap: 4px;">`;
-      for (let widthOpt of widthOptions) {
-        const isSelected = currentWidth === widthOpt.width;
-        html += `
-          <button class="murder-board-connection-width-btn" data-width="${widthOpt.width}"
-                  style="flex: 1; padding: 6px 8px; cursor: pointer;
-                         border: ${isSelected ? '2px solid #888' : '1px solid #555'}; 
-                         background: ${isSelected ? '#444' : '#333'};
-                         color: #fff;
-                         border-radius: 3px; transition: all 0.2s; font-size: 11px; font-weight: 500;"
-                  title="${widthOpt.label}">
-            ${widthOpt.label}
-          </button>
-        `;
-      }
+      // Add width slider for 1-10 range
+      const currentWidth = connection.width || 5;
+      html += `<div style="padding: 12px; border-bottom: 1px solid #444;">`;
+      html += `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+        <span style="color: #fff; font-size: 12px; flex: 0 0 50px;">Size:</span>
+        <input type="range" class="murder-board-connection-width-slider" 
+               data-connection-id="${connection.id}" 
+               min="1" max="10" step="1" value="${currentWidth}"
+               style="flex: 1; cursor: pointer; height: 6px;">
+        <span class="murder-board-width-value" style="color: #fff; font-size: 12px; font-weight: bold; flex: 0 0 30px; text-align: right;">${currentWidth}</span>
+      </div>`;
+      html += `<p style="color: #aaa; font-size: 10px; margin: 0;">Thin (1) to Thick (10)</p>`;
       html += `</div>`;
-
-      // Add edit label button
-      html += `
-        <div class="murder-board-context-edit-label-btn" style="padding: 8px 12px; cursor: pointer; display: flex; align-items: center; gap: 8px; user-select: none; color: #fff; border-bottom: 1px solid #444; background: #333;"
-             onmouseover="this.style.backgroundColor='#444'" 
-             onmouseout="this.style.backgroundColor='#333'">
-          <i class="fas fa-edit" style="color: #fff;"></i>
-          <span>Edit Label</span>
-        </div>
-      `;
 
       // Add delete button
       html += `
@@ -2311,17 +3098,9 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       `;
       html += '</div>';
 
-      // Create a temporary div container
+      // Create a temporary div container - only set positioning, let CSS handle styling
       const menuDiv = document.createElement('div');
       menuDiv.innerHTML = html;
-      menuDiv.style.position = 'fixed';
-      menuDiv.style.left = pageX + 'px';
-      menuDiv.style.top = pageY + 'px';
-      menuDiv.style.zIndex = '10000';
-      menuDiv.style.backgroundColor = '#2a2a2a';
-      menuDiv.style.border = '1px solid #555';
-      menuDiv.style.borderRadius = '4px';
-      menuDiv.style.boxShadow = '0 2px 8px rgba(0,0,0,0.5)';
       
       document.body.appendChild(menuDiv);
 
@@ -2345,51 +3124,75 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         }
       });
 
+      // Store references to handlers for proper cleanup
+      const handlers = [];
+
       // Attach color button handlers
       const colorBtns = menuDiv.querySelectorAll('.murder-board-connection-color-btn');
       colorBtns.forEach((btn) => {
-        btn.addEventListener('click', (e) => {
+        const handler = (e) => {
           e.stopPropagation();
           const newColor = btn.dataset.color;
           self._updateConnectionColor(connection.id, newColor);
-        });
+        };
+        btn.addEventListener('click', handler);
+        handlers.push({ element: btn, event: 'click', handler });
       });
 
       // Attach width button handlers
       const widthBtns = menuDiv.querySelectorAll('.murder-board-connection-width-btn');
       widthBtns.forEach((btn) => {
-        btn.addEventListener('click', (e) => {
+        const handler = (e) => {
           e.stopPropagation();
           const newWidth = parseInt(btn.dataset.width);
           self._updateConnectionWidth(connection.id, newWidth);
-        });
+        };
+        btn.addEventListener('click', handler);
+        handlers.push({ element: btn, event: 'click', handler });
       });
 
-      // Attach edit label button handler
-      const editLabelBtn = menuDiv.querySelector('.murder-board-context-edit-label-btn');
-      if (editLabelBtn) {
-        editLabelBtn.addEventListener('click', (e) => {
+      // Attach width slider handlers
+      const widthSlider = menuDiv.querySelector('.murder-board-connection-width-slider');
+      const widthValueDisplay = menuDiv.querySelector('.murder-board-width-value');
+      if (widthSlider && widthValueDisplay) {
+        const handler = (e) => {
           e.stopPropagation();
-          menuDiv.remove();
-          self._showEditConnectionLabelDialog(connection);
-        });
+          const newWidth = parseInt(e.target.value);
+          widthValueDisplay.textContent = newWidth;
+          self._updateConnectionWidth(connection.id, newWidth);
+        };
+        widthSlider.addEventListener('input', handler);
+        handlers.push({ element: widthSlider, event: 'input', handler });
       }
 
       // Attach delete button handler
       const deleteBtn = menuDiv.querySelector('.murder-board-context-delete-btn');
       if (deleteBtn) {
-        deleteBtn.addEventListener('click', (e) => {
+        const handler = (e) => {
           e.stopPropagation();
           self._deleteConnection(connection.id);
-          menuDiv.remove();
-        });
+          self._cleanupConnectionMenu(menuDiv, handlers, closeMenu, closeOnEscape);
+        };
+        deleteBtn.addEventListener('click', handler);
+        handlers.push({ element: deleteBtn, event: 'click', handler });
+      }
+
+      // Attach edit label button handler
+      const createLabelBtn = menuDiv.querySelector('.murder-board-context-create-label-btn');
+      if (createLabelBtn) {
+        const handler = (e) => {
+          e.stopPropagation();
+          self._createConnectionLabel(connection.id);
+          self._cleanupConnectionMenu(menuDiv, handlers, closeMenu, closeOnEscape);
+        };
+        createLabelBtn.addEventListener('click', handler);
+        handlers.push({ element: createLabelBtn, event: 'click', handler });
       }
 
       // Remove menu when clicking elsewhere - close ALL context menus
       const closeMenu = (e) => {
         if (!menuDiv.contains(e.target)) {
-          document.querySelectorAll('.murder-board-context-menu').forEach(menu => menu.remove());
-          document.removeEventListener('click', closeMenu);
+          self._cleanupConnectionMenu(menuDiv, handlers, closeMenu, closeOnEscape);
         }
       };
       document.addEventListener('click', closeMenu);
@@ -2397,14 +3200,75 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       // Also close on escape key
       const closeOnEscape = (e) => {
         if (e.key === 'Escape') {
-          document.querySelectorAll('.murder-board-context-menu').forEach(menu => menu.remove());
-          document.removeEventListener('keydown', closeOnEscape);
-          document.removeEventListener('click', closeMenu);
+          self._cleanupConnectionMenu(menuDiv, handlers, closeMenu, closeOnEscape);
         }
       };
       document.addEventListener('keydown', closeOnEscape);
     } catch (error) {
       console.error('Murder Board | Error in _showConnectionMenu:', error);
+    }
+  }
+
+  /**
+   * Clean up connection context menu and event listeners
+   * @param {HTMLElement} menuDiv - The menu div to remove
+   * @param {Array} handlers - Array of handler objects to remove
+   * @param {Function} closeMenu - Close menu click handler to remove
+   * @param {Function} closeOnEscape - Close on escape handler to remove
+   * @private
+   */
+  _cleanupConnectionMenu(menuDiv, handlers, closeMenu, closeOnEscape) {
+    try {
+      // Remove all event listeners to prevent memory leaks
+      handlers.forEach(({ element, event, handler }) => {
+        try {
+          element.removeEventListener(event, handler);
+        } catch (e) {
+          // Silently ignore errors from individual listener removal
+        }
+      });
+
+      // Remove document-level listeners
+      try {
+        document.removeEventListener('click', closeMenu);
+        document.removeEventListener('keydown', closeOnEscape);
+      } catch (e) {
+        // Silently ignore errors
+      }
+
+      // Hide the menu immediately to prevent rendering artifacts
+      if (menuDiv && menuDiv.parentNode) {
+        menuDiv.style.display = 'none';
+        menuDiv.style.visibility = 'hidden';
+        menuDiv.style.pointerEvents = 'none';
+        menuDiv.style.opacity = '0';
+      }
+
+      // Clear any remaining menu divs and remove from DOM
+      document.querySelectorAll('.murder-board-context-menu').forEach(menu => {
+        try {
+          menu.style.display = 'none';
+          menu.style.visibility = 'hidden';
+          menu.style.pointerEvents = 'none';
+          menu.style.opacity = '0';
+          menu.remove();
+        } catch (e) {
+          // Silently ignore errors
+        }
+      });
+
+      // Force a canvas redraw to clear any rendering artifacts
+      if (this.renderer && this.canvas) {
+        // Clear the canvas completely before redraw
+        const ctx = this.canvas.getContext('2d');
+        if (ctx) {
+          ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        }
+        // Redraw the canvas
+        this.renderer.draw();
+      }
+    } catch (error) {
+      console.error('Murder Board | Error in _cleanupConnectionMenu:', error);
     }
   }
 
@@ -2430,7 +3294,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
    */
   async _updateConnectionColor(connectionId, color) {
     try {
-      const boardData = MurderBoardData.getBoardData(this.scene);
+      const boardData = MurderBoardData.getGlobalBoardData();
       const connection = boardData.connections.find(c => c.id === connectionId);
 
       if (connection) {
@@ -2462,7 +3326,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
    */
   async _updateConnectionWidth(connectionId, width) {
     try {
-      const boardData = MurderBoardData.getBoardData(this.scene);
+      const boardData = MurderBoardData.getGlobalBoardData();
       const connection = boardData.connections.find(c => c.id === connectionId);
 
       if (connection) {
@@ -2488,83 +3352,231 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
   }
 
   /**
-   * Show dialog to edit connection label
-   * @param {Object} connection - Connection object
+   * Update the offset of a connection label after it's been repositioned
+   * @param {string} labelItemId - The ID of the label text item
    */
-  _showEditConnectionLabelDialog(connection) {
-    const currentLabel = connection.label || '';
-    
-    // Create dialog content
-    const dialogContent = `
-      <div style="padding: 12px; min-width: 300px;">
-        <div class="form-group">
-          <label for="connection-label-input" style="display: block; margin-bottom: 8px; font-weight: bold;">Connection Label</label>
-          <input 
-            type="text" 
-            id="connection-label-input" 
-            value="${currentLabel}" 
-            placeholder="e.g., Enemy of, Accomplice, Dated, etc."
-            style="width: 100%; padding: 8px 12px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 13px;"
-            autofocus
-          >
-          <p style="margin-top: 8px; margin-bottom: 0; font-size: 12px; color: #666;">This label will appear on the connection line</p>
-        </div>
-      </div>
-    `;
-
-    // Create buttons
-    const buttons = {
-      save: {
-        label: 'Save',
-        callback: (html) => {
-          const newLabel = html.find('#connection-label-input').val() || '';
-          this._updateConnectionLabel(connection.id, newLabel);
-        }
-      },
-      cancel: {
-        label: 'Cancel'
+  _updateConnectionLabelOffset(labelItemId) {
+    try {
+      const boardData = MurderBoardData.getGlobalBoardData();
+      const labelItem = boardData.items.find(i => i.id === labelItemId);
+      
+      if (!labelItem) return;
+      
+      // Find the connection this label belongs to
+      const connection = boardData.connections.find(c => c.labelItemId === labelItemId);
+      
+      if (!connection) return;
+      
+      // Get the connected items
+      const fromItem = boardData.items.find(i => i.id === connection.fromItem);
+      const toItem = boardData.items.find(i => i.id === connection.toItem);
+      
+      if (!fromItem || !toItem) return;
+      
+      // Calculate connection midpoint
+      const centerFrom = {
+        x: fromItem.x + (fromItem.data?.width || 40) / 2,
+        y: fromItem.y + (fromItem.data?.height || 40) / 2
+      };
+      const centerTo = {
+        x: toItem.x + (toItem.data?.width || 40) / 2,
+        y: toItem.y + (toItem.data?.height || 40) / 2
+      };
+      
+      const midX = (centerFrom.x + centerTo.x) / 2;
+      const midY = (centerFrom.y + centerTo.y) / 2;
+      
+      // Get label center position
+      const labelWidth = labelItem.data?.width || 120;
+      const labelHeight = labelItem.data?.height || 50;
+      const labelCenterX = labelItem.x + labelWidth / 2;
+      const labelCenterY = labelItem.y + labelHeight / 2;
+      
+      // Calculate the offset from midpoint to label position
+      const offsetX = labelCenterX - midX;
+      const offsetY = labelCenterY - midY;
+      
+      // Save the offset to the connection
+      connection.labelOffsetX = offsetX;
+      connection.labelOffsetY = offsetY;
+      
+      // Persist the changes
+      MurderBoardData.saveGlobalBoardData(boardData).catch(err => 
+        console.error('Failed to save label offset:', err)
+      );
+      
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('updateConnection', {
+          sceneId: this.scene.id,
+          connectionId: connection.id,
+          updates: { 
+            labelOffsetX: offsetX,
+            labelOffsetY: offsetY
+          }
+        });
       }
-    };
-
-    // Show dialog
-    new Dialog({
-      title: 'Edit Connection Label',
-      content: dialogContent,
-      buttons: buttons,
-      default: 'save'
-    }).render(true);
+    } catch (error) {
+      console.error('Murder Board | Error updating label offset:', error);
+    }
   }
 
   /**
-   * Update connection label
-   * @param {string} connectionId - Connection ID
-   * @param {string} label - New label text
+   * Update positions of connection label text items based on their connection midpoints
+   * Call this whenever items involved in connections are moved
+   * @param {Array} items - Array of all items on the board
+   * @param {Array} connections - Array of all connections
    */
-  async _updateConnectionLabel(connectionId, label) {
+  _updateConnectionLabelPositions(items, connections) {
+    if (!connections || connections.length === 0) return;
+    
+    let labelsUpdated = false;
+    
+    connections.forEach(connection => {
+      if (!connection.labelItemId) return; // Skip connections without labels
+      
+      const fromItem = items.find(i => i.id === connection.fromItem);
+      const toItem = items.find(i => i.id === connection.toItem);
+      const labelItem = items.find(i => i.id === connection.labelItemId);
+      
+      if (!fromItem || !toItem || !labelItem) return;
+      
+      // Calculate connection midpoint
+      const centerFrom = {
+        x: fromItem.x + (fromItem.data?.width || 40) / 2,
+        y: fromItem.y + (fromItem.data?.height || 40) / 2
+      };
+      const centerTo = {
+        x: toItem.x + (toItem.data?.width || 40) / 2,
+        y: toItem.y + (toItem.data?.height || 40) / 2
+      };
+      
+      const midX = (centerFrom.x + centerTo.x) / 2;
+      const midY = (centerFrom.y + centerTo.y) / 2;
+      
+      // Apply any stored offset from manual positioning
+      const offsetX = connection.labelOffsetX || 0;
+      const offsetY = connection.labelOffsetY || 0;
+      
+      // Position label at midpoint + offset (centered)
+      const labelWidth = labelItem.data?.width || 120;
+      const labelHeight = labelItem.data?.height || 50;
+      labelItem.x = (midX + offsetX) - labelWidth / 2;
+      labelItem.y = (midY + offsetY) - labelHeight / 2;
+      
+      labelsUpdated = true;
+    });
+    
+    return labelsUpdated;
+  }
+
+  /**
+   * Create a Text item label for a connection
+   * @param {string} connectionId - Connection ID
+   */
+  async _createConnectionLabel(connectionId) {
     try {
-      const boardData = MurderBoardData.getBoardData(this.scene);
+      const boardData = MurderBoardData.getGlobalBoardData();
       const connection = boardData.connections.find(c => c.id === connectionId);
-
-      if (connection) {
-        connection.label = label;
-        await this._updateBoardConnections(boardData.connections);
-
-        // Emit socket message for multiplayer sync
-        if (!game.user.isGM) {
-          emitSocketMessage('updateConnection', {
-            sceneId: this.scene.id,
-            connectionId: connectionId,
-            updates: { label: label },
-          });
-        }
-
-        this.renderer.draw();
-        this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ConnectionUpdated'));
+      
+      if (!connection) return;
+      
+      // Check if label already exists
+      if (connection.labelItemId) {
+        this._notify('This connection already has a label', 'warn');
+        return;
       }
+      
+      // Get the two items to calculate midpoint
+      const fromItem = boardData.items.find(i => i.id === connection.fromItem);
+      const toItem = boardData.items.find(i => i.id === connection.toItem);
+      
+      if (!fromItem || !toItem) {
+        this._notify('Could not find connected items', 'error');
+        return;
+      }
+      
+      // Calculate connection midpoint
+      const centerFrom = {
+        x: fromItem.x + (fromItem.data?.width || 40) / 2,
+        y: fromItem.y + (fromItem.data?.height || 40) / 2
+      };
+      const centerTo = {
+        x: toItem.x + (toItem.data?.width || 40) / 2,
+        y: toItem.y + (toItem.data?.height || 40) / 2
+      };
+      
+      const midX = (centerFrom.x + centerTo.x) / 2;
+      const midY = (centerFrom.y + centerTo.y) / 2;
+      
+      // Get board default font and color settings
+      const defaultFont = boardData.defaultFont || 'Arial';
+      const defaultFontColor = boardData.defaultFontColor || '#000000';
+      
+      // Create a Text item at the midpoint
+      const labelItem = {
+        id: foundry.utils.randomID(),
+        type: 'Text',
+        label: 'Connection Label',
+        x: midX - 60, // Center the text (approximate width)
+        y: midY - 25, // Center the text (approximate height)
+        color: '#000000',
+        acceptsConnections: false, // Connection labels should not accept connections by default
+        data: {
+          text: 'Label',
+          fontSize: 14,
+          font: defaultFont,
+          width: 120,
+          height: 50,
+          textColor: defaultFontColor
+        }
+      };
+      
+      // Add the text item to the board
+      boardData.items.push(labelItem);
+      
+      // Link the label item to the connection
+      connection.labelItemId = labelItem.id;
+      
+      // Save changes
+      await this._updateBoardItems(boardData.items);
+      await this._updateBoardConnections(boardData.connections);
+      
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('addItem', {
+          sceneId: this.scene.id,
+          item: labelItem
+        });
+        emitSocketMessage('updateConnection', {
+          sceneId: this.scene.id,
+          connectionId: connectionId,
+          updates: { labelItemId: labelItem.id }
+        });
+      }
+      
+      this.renderer.draw();
+      this._notify('Label created. Edit the text item to customize the label');
     } catch (error) {
-      console.error('Murder Board | Error updating connection label:', error);
-      this._notify('Error updating connection label', 'error');
+      console.error('Murder Board | Error creating connection label:', error);
+      this._notify('Error creating connection label', 'error');
     }
+  }
+
+  /**
+   * Edit connection label via dialog (opens Text item editor)
+   * @param {string} connectionId - Connection ID
+   */
+  async _editConnectionLabel(connectionId) {
+    const boardData = MurderBoardData.getGlobalBoardData();
+    const connection = boardData.connections.find(c => c.id === connectionId);
+    
+    if (!connection || !connection.labelItemId) return;
+    
+    // Import and open QuickTextItemDialog in edit mode for the label Text item
+    const { QuickTextItemDialog } = await import('./item-dialogs.js');
+    const dialog = new QuickTextItemDialog(this.scene, connection.labelItemId);
+    dialog.render(true);
   }
 
   /**
@@ -2588,37 +3600,6 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     } catch (error) {
       console.error('Murder Board | Error deleting connection:', error);
       this._notify('Error deleting connection', 'error');
-    }
-  }
-
-  /**
-   * Show item creation dialog with optional pre-filled coordinates
-   * @param {string} itemType - Type of item ('note', 'image', 'document')
-   * @param {Object} prefilledCoords - Optional object with x, y coordinates
-   */
-  async _showItemDialog(itemType, prefilledCoords = null) {
-    try {
-      let DialogClass;
-
-      if (itemType === 'note') {
-        DialogClass = NoteItemDialog;
-      } else if (itemType === 'text') {
-        DialogClass = TextItemDialog;
-      } else if (itemType === 'image') {
-        DialogClass = ImageItemDialog;
-      } else if (itemType === 'document') {
-        DialogClass = DocumentItemDialog;
-      } else {
-        this._notify('Invalid item type', 'error');
-        return;
-      }
-
-      // Store prefilled coordinates on the dialog instance
-      const dialog = new DialogClass(this.scene, null, { prefilledCoords });
-      dialog.render(true);
-    } catch (error) {
-      console.error('Murder Board | Error showing item dialog:', error);
-      this._notify('Error creating item', 'error');
     }
   }
 
@@ -2936,11 +3917,6 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
    * @param {KeyboardEvent} event
    */
   async _onCanvasKeyDown(event) {
-    // Only handle Delete key if the board is ready
-    if (event.key !== 'Delete' || !this.renderer) {
-      return;
-    }
-
     // Don't trigger if user is typing in an input field
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'TEXTAREA') {
       return;
@@ -2949,6 +3925,55 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     // Check if the Murder Board window is currently visible/focused
     // Use the element to check if it's in the DOM and visible
     if (!this.element || !this.element.closest('body')) {
+      return;
+    }
+
+    // Create unique key identifier for combo (e.g., "ctrl+d")
+    const keyId = this._getKeyComboId(event);
+    
+    // Prevent repeated firing while key is held - only process first press
+    if (this.pressedKeys.has(keyId)) {
+      return;
+    }
+    
+    // Mark key as pressed
+    this.pressedKeys.add(keyId);
+
+    // Handle CTRL+C - create connection between 2 selected items
+    if ((event.key === 'c' || event.key === 'C') && event.ctrlKey && !event.shiftKey) {
+      event.preventDefault();
+      await this._createConnectionBetweenSelected();
+      return;
+    }
+
+    // Handle CTRL+D - duplicate selected items
+    if ((event.key === 'd' || event.key === 'D') && event.ctrlKey && !event.shiftKey) {
+      event.preventDefault();
+      await this._duplicateSelectedItems();
+      return;
+    }
+
+    // Handle CTRL+G - toggle group/ungroup selected items
+    if ((event.key === 'g' || event.key === 'G') && event.ctrlKey) {
+      event.preventDefault();
+      await this._toggleGroupSelectedItems();
+      return;
+    }
+
+    // Handle G key - toggle group borders
+    if ((event.key === 'g' || event.key === 'G') && !event.ctrlKey) {
+      event.preventDefault();
+      if (this.renderer) {
+        this.renderer.showGroupBorders = !this.renderer.showGroupBorders;
+        this.renderer.draw();
+        const status = this.renderer.showGroupBorders ? 'enabled' : 'disabled';
+        this._notify(`Group borders ${status}`, 'info');
+      }
+      return;
+    }
+
+    // Handle Delete key - only if renderer is ready
+    if (event.key !== 'Delete' || !this.renderer) {
       return;
     }
 
@@ -2968,6 +3993,158 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
 
     // Delete selected items without confirmation
     await this._deleteSelectedItems();
+  }
+
+  /**
+   * Handle keyboard key up events to track key releases
+   * @param {KeyboardEvent} event
+   */
+  _onCanvasKeyUp(event) {
+    // Remove key from pressed keys set when released
+    const keyId = this._getKeyComboId(event);
+    this.pressedKeys.delete(keyId);
+  }
+
+  /**
+   * Get a unique identifier for a key combination
+   * @param {KeyboardEvent} event
+   * @returns {string} Unique key combo identifier (e.g., "ctrl+d")
+   */
+  _getKeyComboId(event) {
+    const key = event.key.toLowerCase();
+    const ctrl = event.ctrlKey || event.metaKey;
+    const shift = event.shiftKey;
+    const alt = event.altKey;
+    
+    let combo = [];
+    if (ctrl) combo.push('ctrl');
+    if (shift) combo.push('shift');
+    if (alt) combo.push('alt');
+    combo.push(key);
+    
+    return combo.join('+');
+  }
+
+  /**
+   * Create a connection between two selected items (Ctrl+Shift+C hotkey)
+   * @returns {Promise<void>}
+   */
+  async _createConnectionBetweenSelected() {
+    // Check if we have exactly 2 items selected
+    if (this.selectedItems.length !== 2) {
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.SelectTwoItems') || 'Please select exactly 2 items to create a connection', 'warn');
+      return;
+    }
+
+    // Check permissions
+    if (!MurderBoardData.canUserEdit(this.scene)) {
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.CannotEdit'), 'warn');
+      return;
+    }
+
+    try {
+      const fromItemId = this.selectedItems[0];
+      const toItemId = this.selectedItems[1];
+
+      // Add the connection to the data model
+      const connectionId = await MurderBoardData.addConnection(this.scene, fromItemId, toItemId);
+
+      if (!connectionId) {
+        throw new Error('Failed to create connection');
+      }
+
+      // Broadcast to other clients
+      if (!game.user.isGM) {
+        emitSocketMessage('addConnection', {
+          sceneId: this.scene.id,
+          fromId: fromItemId,
+          toId: toItemId,
+        });
+      }
+
+      // Refresh the renderer
+      this.renderer.refresh();
+      this.renderer.draw();
+
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ConnectionCreated') || 'Connection created', 'info');
+    } catch (error) {
+      console.error('Murder Board | Error creating connection:', error);
+      this._notify(error.message || 'Failed to create connection', 'error');
+    }
+  }
+
+  /**
+   * Duplicate selected items with an offset (Ctrl+Shift+D hotkey)
+   * @returns {Promise<void>}
+   */
+  async _duplicateSelectedItems() {
+    // Check if we have items selected
+    if (this.selectedItems.length === 0) {
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.SelectItems') || 'Please select items to duplicate', 'warn');
+      return;
+    }
+
+    // Check permissions
+    if (!MurderBoardData.canUserEdit(this.scene)) {
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.CannotEdit'), 'warn');
+      return;
+    }
+
+    try {
+      const boardData = MurderBoardData.getGlobalBoardData();
+      const newItemIds = [];
+      const offset = { x: 20, y: 20 }; // Offset duplicates to avoid overlap
+
+      // Duplicate each selected item
+      for (const itemId of this.selectedItems) {
+        const originalItem = boardData.items.find(item => item.id === itemId);
+        if (!originalItem) {
+          console.warn(`Murder Board | Item not found: ${itemId}`);
+          continue;
+        }
+
+        // Create duplicate with offset position
+        const duplicate = {
+          id: foundry.utils.randomID(),
+          type: originalItem.type,
+          label: originalItem.label || '',
+          x: originalItem.x + offset.x,
+          y: originalItem.y + offset.y,
+          color: originalItem.color || '#FFFFFF',
+          rotation: originalItem.rotation || 0,
+          data: { ...originalItem.data },
+          acceptsConnections: originalItem.acceptsConnections !== false,
+          createdAt: new Date().toISOString(),
+        };
+
+        boardData.items.push(duplicate);
+        newItemIds.push(duplicate.id);
+      }
+
+      // Save the updated board
+      await MurderBoardData.saveGlobalBoardData(boardData);
+
+      // Broadcast to other clients
+      if (!game.user.isGM) {
+        emitSocketMessage('duplicateItems', {
+          itemIds: this.selectedItems,
+          offset: offset,
+        });
+      }
+
+      // Update selection to new items and refresh
+      this.selectedItems = newItemIds;
+      if (this.renderer) {
+        this.renderer.selectedItems = newItemIds;
+        this.renderer.refresh();
+        this.renderer.draw();
+      }
+
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ItemsDuplicated') || `Duplicated ${newItemIds.length} item(s)`, 'info');
+    } catch (error) {
+      console.error('Murder Board | Error duplicating items:', error);
+      this._notify(error.message || 'Failed to duplicate items', 'error');
+    }
   }
 
   /**
@@ -3031,8 +4208,8 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       // Check if this is an item type drop from the picker
       const itemType = event.dataTransfer.getData('application/murder-board-item-type');
       if (itemType) {
-        // Open the item dialog with pre-filled coordinates
-        this._openItemDialog(itemType, null, { x: worldCoords.x, y: worldCoords.y });
+        // Create item at drop location with defaults
+        await this._createItemAtLocation(itemType, worldCoords.x, worldCoords.y);
         return;
       }
 
@@ -3114,7 +4291,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         }
 
         // Upload file to murder-board-uploads/{boardId}
-        const boardData = MurderBoardData.getBoardData(this.scene);
+        const boardData = MurderBoardData.getGlobalBoardData();
         const uploadPath = `murder-board-uploads/${boardData.id}`;
         
         try {
@@ -3325,6 +4502,9 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     try {
       const itemName = item.name || 'Unknown Item';
       const itemType = item.type || 'Generic';
+      const boardData = MurderBoardData.getGlobalBoardData();
+      const defaultFont = boardData.defaultFont || 'Arial';
+      const defaultFontColor = boardData.defaultFontColor || '#000000';
 
       // If the item has an image, create an Image item
       if (item.img) {
@@ -3355,8 +4535,8 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
         color: '#87CEEB', // Sky blue for items
         data: {
           text: `**${itemName}**\n\nType: ${itemType}\n\nItem: ${item.uuid}`,
-          font: 'Arial',
-          textColor: '#000000',
+          font: defaultFont,
+          textColor: defaultFontColor,
           fontSize: 14,
           itemUuid: item.uuid, // Store UUID to open sheet on double-click
         },
@@ -3603,6 +4783,35 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
 
       if (!imageUrl) return null;
 
+      // Load image to get actual dimensions for proper aspect ratio
+      let width = 80;
+      let height = 80;
+      
+      try {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        await new Promise((resolve, reject) => {
+          img.onload = () => {
+            // Scale image to reasonable size (max 200px on longest side)
+            const maxSize = 200;
+            const aspect = img.width / img.height;
+            if (aspect > 1) {
+              width = Math.min(img.width, maxSize);
+              height = width / aspect;
+            } else {
+              height = Math.min(img.height, maxSize);
+              width = height * aspect;
+            }
+            resolve();
+          };
+          img.onerror = reject;
+          img.src = imageUrl;
+        });
+      } catch (error) {
+        // If image fails to load, use default size
+        console.warn('Murder Board | Failed to load image for dimensions:', error);
+      }
+
       const newItem = {
         id: foundry.utils.randomID(),
         type: 'Image',
@@ -3617,7 +4826,10 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
           borderColor: 'white',
           fastenerType: 'pushpin',
           shadow: 'drop',
+          width: width,
+          height: height,
         },
+        _migrationApplied: true,  // Mark as migrated so migration won't delete dimensions
       };
 
       return newItem;
@@ -3633,12 +4845,15 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
    */
   async _deleteSelectedItems() {
     try {
-      const boardData = MurderBoardData.getBoardData(this.scene);
+      const boardData = MurderBoardData.getGlobalBoardData();
       
       // Delete items and their associated connections
       for (const itemId of this.selectedItems) {
         // Remove item
         await MurderBoardData.deleteItem(this.scene, itemId);
+        
+        // Clean up any connections that reference this item as a label
+        await this._cleanupDeletedLabel(itemId);
         
         // Remove any connections involving this item
         const connections = MurderBoardData.getConnections(this.scene);
@@ -3694,6 +4909,20 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     if (this.renderer) {
       this.renderer.selectedItem = this.selectedItems[0] || null; // For compatibility
       this.renderer.selectedItems = this.selectedItems;
+      
+      // If any selected item is in a group, highlight the entire group
+      let highlightedGroupId = null;
+      if (this.selectedItems.length > 0) {
+        const boardData = MurderBoardData.getGlobalBoardData();
+        const firstSelectedItem = boardData.items.find(i => i.id === this.selectedItems[0]);
+        if (firstSelectedItem && firstSelectedItem.groupId) {
+          highlightedGroupId = firstSelectedItem.groupId;
+        }
+      }
+      this.renderer.highlightedGroupId = highlightedGroupId;
+      
+      // Trigger canvas redraw to show highlights
+      this.renderer.draw();
     }
   }
 
@@ -3713,7 +4942,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     const maxY = Math.max(y1, y2);
 
     // Get items within box
-    const boardData = MurderBoardData.getBoardData(this.scene);
+    const boardData = MurderBoardData.getGlobalBoardData();
     const selectedIds = [];
 
     boardData.items.forEach(item => {
@@ -3783,36 +5012,310 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
   }
 
   /**
-   * Open appropriate dialog for item type
-   * @param {string} type - Item type (Note, Image, Document)
-   * @param {string} itemId - Optional item ID for editing
+   * Create an item with default values
+   * @param {string} type - Item type (Note, Text, Image, Document)
    */
-  _openItemDialog(type, itemId = null, options = {}) {
+  async _createItemWithDefaults(type) {
     try {
-      let DialogClass;
+      const board = MurderBoardData.getGlobalBoardData();
+      
+      // Center position on canvas
+      const centerX = this.renderer.canvas.width / 2;
+      const centerY = this.renderer.canvas.height / 2;
 
-      switch (type) {
-        case 'Note':
-          DialogClass = NoteItemDialog;
-          break;
-        case 'Text':
-          DialogClass = TextItemDialog;
-          break;
-        case 'Image':
-          DialogClass = ImageItemDialog;
-          break;
-        case 'Document':
-          DialogClass = DocumentItemDialog;
-          break;
-        default:
-          throw new Error(`Unknown item type: ${type}`);
+      const defaultFontStyle = board.defaultFont || 'Arial';
+
+      // For images, open file picker immediately before creating item
+      if (type === 'Image') {
+        return await this._createImageWithFilePicker(centerX, centerY);
       }
 
-      const dialog = new DialogClass(this.scene, itemId, options);
+      // For notes and text, open creation dialog immediately
+      if (type === 'Note') {
+        return await this._createNoteWithDialog(centerX, centerY);
+      }
+
+      if (type === 'Text') {
+        return await this._createTextWithDialog(centerX, centerY);
+      }
+
+      if (type === 'Document') {
+        return await this._createDocumentWithDialog(centerX, centerY);
+      }
+
+      let itemData = {
+        type: type,
+        label: `New ${type}`,
+        x: centerX,
+        y: centerY,
+        color: type === 'Document' ? '#FFFEF5' : '#FFFFFF',
+        acceptsConnections: true,
+        data: {},
+      };
+
+      // Set type-specific defaults (for Document)
+      if (type === 'Document') {
+        itemData.data = {
+          preset: 'blank',
+          font: defaultFontStyle,
+          size: 'medium',
+          effect: 'none',
+          effectIntensity: 1,
+          effectSeed: 50,
+        };
+      }
+
+      await MurderBoardData.addItem(this.scene, itemData);
+
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('addItem', {
+          sceneId: this.scene.id,
+          itemData: itemData,
+        });
+      }
+
+      if (this.renderer) {
+        this.renderer.refresh();
+        this.renderer.draw();
+      }
+
+      this._notify(`${type} created. Use context menu to customize.`, 'info');
+    } catch (error) {
+      console.error('Murder Board | Error creating item:', error);
+      this._notify(`Error creating ${type}`, 'error');
+    }
+  }
+
+  /**
+   * Create a note item and immediately open quick dialog for text entry
+   * @param {number} x - X position
+   * @param {number} y - Y position
+   * @private
+   */
+  async _createNoteWithDialog(x, y) {
+    try {
+      const { QuickNoteItemDialog } = await import('./item-dialogs.js');
+      
+      // Open quick note dialog in creation mode with prefilled coordinates
+      const dialog = new QuickNoteItemDialog(this.scene, null, {
+        prefilledCoords: { x, y },
+      });
+      
       dialog.render(true);
     } catch (error) {
-      console.error('Murder Board | Error in _openItemDialog:', error);
-      this._notify(`Error opening item dialog: ${error.message}`, 'error');
+      console.error('Murder Board | Error creating note with dialog:', error);
+      this._notify('Error creating note', 'error');
+    }
+  }
+
+  /**
+   * Create a text item and immediately open quick dialog for text entry
+   * @param {number} x - X position
+   * @param {number} y - Y position
+   * @private
+   */
+  async _createTextWithDialog(x, y) {
+    try {
+      const { QuickTextItemDialog } = await import('./item-dialogs.js');
+      
+      // Open quick text dialog in creation mode with prefilled coordinates
+      const dialog = new QuickTextItemDialog(this.scene, null, {
+        prefilledCoords: { x, y },
+      });
+      
+      dialog.render(true);
+    } catch (error) {
+      console.error('Murder Board | Error creating text with dialog:', error);
+      this._notify('Error creating text', 'error');
+    }
+  }
+
+  /**
+   * Create an image item and immediately prompt for image selection
+   * @param {number} x - X position
+   * @param {number} y - Y position
+   * @private
+   */
+  async _createImageWithFilePicker(x, y) {
+    try {
+      // Get board config
+      const board = MurderBoardData.getGlobalBoardData();
+      const defaultFontStyle = board.defaultFont || 'Arial';
+
+      // Create file picker
+      const filePicker = new foundry.applications.apps.FilePicker.implementation({
+        type: 'imageBrowser',
+        callback: async (path) => {
+          // Load image synchronously first to get dimensions AND cache it
+          let width = 80;
+          let height = 80;
+          let cachedImage = null;
+          
+          await new Promise((resolve) => {
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+              cachedImage = img;  // Store the loaded image
+              // Calculate dimensions with aspect ratio
+              const maxSize = 200;
+              const aspect = img.width / img.height;
+              if (aspect > 1) {
+                width = Math.min(img.width, maxSize);
+                height = width / aspect;
+              } else {
+                height = Math.min(img.height, maxSize);
+                width = height * aspect;
+              }
+              console.log(`Detected image dimensions: ${width}x${height}`);
+              resolve();
+            };
+            img.onerror = () => {
+              console.warn('Failed to load image for dimensions');
+              resolve();
+            };
+            img.src = path;
+          });
+          
+          // NOW create item with the actual dimensions we detected
+          const itemData = {
+            type: 'Image',
+            label: 'Image',
+            x: x,
+            y: y,
+            color: '#FFFFFF',
+            acceptsConnections: true,
+            data: {
+              imageUrl: path,
+              borderColor: '#000000',
+              fastenerType: 'pushpin',
+              width: width,
+              height: height,
+            },
+            _migrationApplied: true,
+          };
+
+          const createdItem = await MurderBoardData.addItem(this.scene, itemData);
+          const itemId = createdItem.id;
+          
+          // Cache the image so the renderer uses it immediately
+          if (cachedImage && this.renderer) {
+            this.renderer.imageCache.set(path, cachedImage);
+          }
+
+          // Emit socket message for multiplayer sync
+          if (!game.user.isGM) {
+            emitSocketMessage('addItem', {
+              sceneId: this.scene.id,
+              itemData: itemData,
+            });
+          }
+
+          if (this.renderer) {
+            this.renderer.refresh();
+            this.renderer.draw();
+          }
+
+          this._notify('Image created', 'info');
+        },
+      });
+
+      filePicker.browse();
+    } catch (error) {
+      console.error('Murder Board | Error creating image with file picker:', error);
+      this._notify('Error creating image', 'error');
+    }
+  }
+
+  /**
+   * Create a document item and immediately open quick dialog for text entry
+   * @param {number} x - X position
+   * @param {number} y - Y position
+   * @private
+   */
+  async _createDocumentWithDialog(x, y) {
+    try {
+      const worldX = (x - this.renderer.camera.x) / this.renderer.camera.zoom;
+      const worldY = (y - this.renderer.camera.y) / this.renderer.camera.zoom;
+
+      const { QuickDocumentItemDialog } = await import('./item-dialogs.js');
+      const dialog = new QuickDocumentItemDialog(this.scene, null, {
+        prefilledCoords: { x: worldX, y: worldY }
+      });
+      dialog.render(true);
+    } catch (error) {
+      console.error('Murder Board | Error creating document with dialog:', error);
+      this._notify('Error creating document', 'error');
+    }
+  }
+
+  /**
+   * Create an item at a specific location (for drag-drop)
+   * @param {string} type - Item type
+   * @param {number} x - World X coordinate
+   * @param {number} y - World Y coordinate
+   */
+  async _createItemAtLocation(type, x, y) {
+    try {
+      // For images, open file picker immediately before creating item
+      if (type === 'Image') {
+        return await this._createImageWithFilePicker(x, y);
+      }
+
+      // For notes and text, open creation dialog immediately
+      if (type === 'Note') {
+        return await this._createNoteWithDialog(x, y);
+      }
+
+      if (type === 'Text') {
+        return await this._createTextWithDialog(x, y);
+      }
+
+      if (type === 'Document') {
+        return await this._createDocumentWithDialog(x, y);
+      }
+
+      const board = MurderBoardData.getGlobalBoardData();
+      const defaultFontStyle = board.defaultFont || 'Arial';
+
+      let itemData = {
+        type: type,
+        label: `New ${type}`,
+        x: x,
+        y: y,
+        color: type === 'Document' ? '#FFFEF5' : '#FFFFFF',
+        acceptsConnections: true,
+        data: {},
+      };
+
+      // Set type-specific defaults (for Document)
+      if (type === 'Document') {
+        itemData.data = {
+          preset: 'blank',
+          font: defaultFontStyle,
+          size: 'medium',
+          effect: 'none',
+          effectIntensity: 1,
+          effectSeed: 50,
+        };
+      }
+
+      await MurderBoardData.addItem(this.scene, itemData);
+
+      if (!game.user.isGM) {
+        emitSocketMessage('addItem', {
+          sceneId: this.scene.id,
+          itemData: itemData,
+        });
+      }
+
+      if (this.renderer) {
+        this.renderer.refresh();
+        this.renderer.draw();
+      }
+    } catch (error) {
+      console.error('Murder Board | Error creating item at location:', error);
+      this._notify(`Error creating ${type}`, 'error');
     }
   }
 
@@ -3919,34 +5422,6 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
   /**
    * Toggle visibility of the center point
    */
-  _onToggleCenter() {
-    if (!this.renderer) return;
-
-    // Toggle the center visibility
-    this.renderer.showCenter = !this.renderer.showCenter;
-
-    // Persist to scene flags
-    this.scene.setFlag('murder-board', 'showCenter', this.renderer.showCenter);
-
-    // Update button styling
-    const toggleBtn = this.element.querySelector('#toggle-center-btn');
-    if (toggleBtn) {
-      if (this.renderer.showCenter) {
-        toggleBtn.classList.add('active');
-      } else {
-        toggleBtn.classList.remove('active');
-      }
-    }
-
-    // Redraw canvas
-    this.renderer.draw();
-
-    // Notify user
-    const message = this.renderer.showCenter
-      ? game.i18n.localize('MURDER_BOARD.Notifications.CenterShown')
-      : game.i18n.localize('MURDER_BOARD.Notifications.CenterHidden');
-    this._notify(message, 'info');
-  }
 
   /**
    * Open board settings dialog
@@ -3958,7 +5433,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       return;
     }
 
-    const boardData = MurderBoardData.getBoardData(this.scene);
+    const boardData = MurderBoardData.getGlobalBoardData();
     const permissions = MurderBoardData.getPermissions(this.scene);
     
     // Build player list for permissions
@@ -3989,6 +5464,121 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
   }
 
   /**
+   * Edit item content (text or image URL) via proper dialog
+   * Uses the same dialogs as "Add" for consistency
+   * @param {string} itemId
+   */
+  async _editItemContent(itemId) {
+    const item = MurderBoardData.getItem(this.scene, itemId);
+    if (!item) {
+      this._notify('Item not found', 'error');
+      return;
+    }
+
+    // Use proper ApplicationV2 dialogs instead of custom inline dialogs
+    if (item.type === 'Text') {
+      const { QuickTextItemDialog } = await import('./item-dialogs.js');
+      const dialog = new QuickTextItemDialog(this.scene, itemId);
+      dialog.render(true);
+    } else if (item.type === 'Note') {
+      const { QuickNoteItemDialog } = await import('./item-dialogs.js');
+      const dialog = new QuickNoteItemDialog(this.scene, itemId);
+      dialog.render(true);
+    } else if (item.type === 'Image') {
+      const { ImageItemDialog } = await import('./item-dialogs.js');
+      const dialog = new ImageItemDialog(this.scene, itemId);
+      dialog.render(true);
+    } else if (item.type === 'Document') {
+      const { QuickDocumentItemDialog } = await import('./item-dialogs.js');
+      const dialog = new QuickDocumentItemDialog(this.scene, itemId);
+      dialog.render(true);
+    } else {
+      this._notify('This item type does not support editing', 'warn');
+      return;
+    }
+  }
+
+  /**
+   * Open file picker to edit an image item's URL
+   * @param {string} itemId - The image item ID
+   */
+  async _editImageUrl(itemId) {
+    const item = MurderBoardData.getItem(this.scene, itemId);
+    if (!item || item.type !== 'Image') {
+      this._notify('Item not found or is not an image', 'error');
+      return;
+    }
+
+    const self = this;
+    const filePicker = new foundry.applications.apps.FilePicker.implementation({
+      type: 'imageBrowser',
+      callback: async (path) => {
+        // Load image to get dimensions
+        let width = item.data?.width || 80;
+        let height = item.data?.height || 80;
+        
+        await new Promise((resolve) => {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          img.onload = () => {
+            // Preserve aspect ratio
+            const maxSize = 200;
+            const aspect = img.width / img.height;
+            if (aspect > 1) {
+              width = Math.min(img.width, maxSize);
+              height = width / aspect;
+            } else {
+              height = Math.min(img.height, maxSize);
+              width = height * aspect;
+            }
+            resolve();
+          };
+          img.onerror = () => {
+            console.warn('Failed to load image for dimensions');
+            resolve();
+          };
+          img.src = path;
+        });
+
+        // Update the item with new image URL and dimensions
+        await MurderBoardData.updateItem(self.scene, itemId, {
+          data: {
+            ...item.data,
+            imageUrl: path,
+            width: width,
+            height: height,
+          },
+        });
+
+        // Emit socket message for multiplayer sync
+        if (!game.user.isGM) {
+          emitSocketMessage('updateItem', {
+            sceneId: self.scene.id,
+            itemId: itemId,
+            updates: {
+              data: {
+                ...item.data,
+                imageUrl: path,
+                width: width,
+                height: height,
+              },
+            },
+          });
+        }
+
+        if (self.renderer) {
+          self.renderer.refresh();
+          self.renderer.draw();
+        }
+
+        self._notify('Image updated', 'info');
+      },
+    });
+
+    filePicker.browse();
+  }
+
+  /**
    * Delete an item
    * @param {string} itemId
    */
@@ -3996,6 +5586,10 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     const success = await MurderBoardData.deleteItem(this.scene, itemId);
 
     if (success) {
+      // Clean up any connections that reference this item as a label
+      console.log(`Murder Board | Deleting item ${itemId}, cleaning up labels...`);
+      await this._cleanupDeletedLabel(itemId);
+
       // Emit socket message for multiplayer sync
       if (!game.user.isGM) {
         emitSocketMessage('deleteItem', {
@@ -4019,6 +5613,9 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     for (const itemId of itemIds) {
       const success = await MurderBoardData.deleteItem(this.scene, itemId);
       if (success) {
+        // Clean up any connections that reference this item as a label
+        await this._cleanupDeletedLabel(itemId);
+
         if (!game.user.isGM) {
           emitSocketMessage('deleteItem', {
             sceneId: this.scene.id,
@@ -4034,6 +5631,335 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       this.renderer.refresh();
       this.renderer.draw();
       this._notify(`${deleteCount} item(s) deleted`);
+    }
+  }
+
+  /**
+   * Clean up connection label references when a label item is deleted
+   * @param {string} deletedItemId - The ID of the deleted item
+   */
+  async _cleanupDeletedLabel(deletedItemId) {
+    try {
+      const boardData = MurderBoardData.getGlobalBoardData();
+      const connections = boardData.connections || [];
+      
+      console.log(`Murder Board | Checking ${connections.length} connections for label references to ${deletedItemId}`);
+      
+      // Find and update all connections that reference this label
+      const updatedConnections = connections.map(connection => {
+        if (connection.labelItemId === deletedItemId) {
+          console.log(`Murder Board | Found connection ${connection.id} with label ${deletedItemId}, clearing...`);
+          return {
+            ...connection,
+            labelItemId: null,
+            labelOffsetX: 0,
+            labelOffsetY: 0,
+          };
+        }
+        return connection;
+      });
+      
+      // Check if anything changed
+      const changed = updatedConnections.some((conn, idx) => conn !== connections[idx]);
+      
+      if (changed) {
+        console.log(`Murder Board | Saving updated connections...`);
+        boardData.connections = updatedConnections;
+        await MurderBoardData.saveGlobalBoardData(boardData);
+        
+        // Broadcast to other clients
+        const affectedConnections = updatedConnections.filter((conn, idx) => conn !== connections[idx]);
+        if (!game.user.isGM) {
+          for (const connection of affectedConnections) {
+            emitSocketMessage('updateConnection', {
+              sceneId: this.scene.id,
+              connectionId: connection.id,
+              updates: {
+                labelItemId: null,
+                labelOffsetX: 0,
+                labelOffsetY: 0,
+              },
+            });
+          }
+        }
+      } else {
+        console.log(`Murder Board | No connections found with label reference to ${deletedItemId}`);
+      }
+    } catch (error) {
+      console.error('Murder Board | Error in _cleanupDeletedLabel:', error);
+    }
+  }
+
+  /**
+   * Bring an item to the front
+   * @param {string} itemId - The item ID
+   */
+  async _bringToFront(itemId) {
+    try {
+      const success = await MurderBoardData.bringToFront(this.scene, itemId);
+      
+      if (!success) {
+        this._notify('Item not found or already at front', 'warn');
+        return;
+      }
+      
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('bringToFront', {
+          sceneId: this.scene.id,
+          itemId: itemId,
+        });
+      }
+      
+      this.renderer.refresh();
+      this.renderer.draw();
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.BroughtToFront') || 'Brought to front');
+    } catch (error) {
+      console.error('Murder Board | Error in _bringToFront:', error);
+      this._notify('Error bringing item to front: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Bring an item forward one layer
+   * @param {string} itemId - The item ID
+   */
+  async _bringForward(itemId) {
+    try {
+      const success = await MurderBoardData.bringForward(this.scene, itemId);
+      
+      if (!success) {
+        this._notify('Item not found or already at front', 'warn');
+        return;
+      }
+      
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('bringForward', {
+          sceneId: this.scene.id,
+          itemId: itemId,
+        });
+      }
+      
+      this.renderer.refresh();
+      this.renderer.draw();
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.BroughtForward') || 'Brought forward');
+    } catch (error) {
+      console.error('Murder Board | Error in _bringForward:', error);
+      this._notify('Error bringing item forward: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Send an item backward one layer
+   * @param {string} itemId - The item ID
+   */
+  async _sendBackward(itemId) {
+    try {
+      const success = await MurderBoardData.sendBackward(this.scene, itemId);
+      
+      if (!success) {
+        this._notify('Item not found or already at back', 'warn');
+        return;
+      }
+      
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('sendBackward', {
+          sceneId: this.scene.id,
+          itemId: itemId,
+        });
+      }
+      
+      this.renderer.refresh();
+      this.renderer.draw();
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.SentBackward') || 'Sent backward');
+    } catch (error) {
+      console.error('Murder Board | Error in _sendBackward:', error);
+      this._notify('Error sending item backward: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Send an item to the back
+   * @param {string} itemId - The item ID
+   */
+  async _sendToBack(itemId) {
+    try {
+      const success = await MurderBoardData.sendToBack(this.scene, itemId);
+      
+      if (!success) {
+        this._notify('Item not found or already at back', 'warn');
+        return;
+      }
+      
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('sendToBack', {
+          sceneId: this.scene.id,
+          itemId: itemId,
+        });
+      }
+      
+      this.renderer.refresh();
+      this.renderer.draw();
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.SentToBack') || 'Sent to back');
+    } catch (error) {
+      console.error('Murder Board | Error in _sendToBack:', error);
+      this._notify('Error sending item to back: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Toggle group/ungroup for selected items
+   * If all selected items are in the same group, ungroup them
+   * If selected items are not grouped, create a new group
+   */
+  async _toggleGroupSelectedItems() {
+    if (this.selectedItems.length === 0) {
+      this._notify('Select items to group or ungroup', 'warn');
+      return;
+    }
+
+    if (!MurderBoardData.canUserEdit(this.scene)) {
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.CannotEdit'), 'warn');
+      return;
+    }
+
+    // Get board data to check group status of selected items
+    const boardData = MurderBoardData.getGlobalBoardData();
+    const selectedItemsData = boardData.items.filter(item => this.selectedItems.includes(item.id));
+    
+    // Check if all selected items are in the same group
+    const groupIds = new Set(selectedItemsData.map(item => item.groupId).filter(Boolean));
+    
+    if (groupIds.size === 1) {
+      // All selected items are in the same group - ungroup them
+      const groupId = Array.from(groupIds)[0];
+      await this._ungroup(groupId);
+    } else if (groupIds.size === 0) {
+      // No selected items are grouped - create a new group
+      if (this.selectedItems.length < 2) {
+        this._notify('Select at least 2 items to create a group', 'warn');
+        return;
+      }
+      await this._createGroup();
+    } else {
+      // Selected items are in different groups - not allowed
+      this._notify('Cannot group items that are already in different groups', 'warn');
+    }
+  }
+
+  /**
+   * Create a group from selected items
+   */
+  async _createGroup() {
+    if (this.selectedItems.length < 2) {
+      this._notify('Select at least 2 items to create a group', 'warn');
+      return;
+    }
+
+    try {
+      const groupId = await MurderBoardData.createGroup(this.selectedItems);
+      
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('createGroup', {
+          itemIds: this.selectedItems,
+        });
+      }
+      
+      // Clear selection and refresh
+      this.selectedItems = [];
+      this.renderer.selectedItems = [];
+      this.renderer.refresh();
+      this.renderer.draw();
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.GroupCreated') || 'Group created');
+    } catch (error) {
+      console.error('Murder Board | Error creating group:', error);
+      this._notify(error.message || 'Failed to create group', 'error');
+    }
+  }
+
+  /**
+   * Ungroup items - removes group and returns items to individual z-index
+   * @param {string} groupId - The group ID to ungroup
+   */
+  async _ungroup(groupId) {
+    try {
+      if (!groupId) {
+        this._notify('No group selected', 'error');
+        return;
+      }
+
+      const success = await MurderBoardData.ungroup(groupId);
+      
+      if (!success) {
+        this._notify('Group not found', 'error');
+        return;
+      }
+      
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('ungroup', {
+          groupId: groupId,
+        });
+      }
+      
+      this.renderer.refresh();
+      this.renderer.draw();
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.GroupDissolved') || 'Group dissolved');
+    } catch (error) {
+      console.error('Murder Board | Error ungrouping:', error);
+      this._notify('Failed to ungroup: ' + error.message, 'error');
+    }
+  }
+
+  /**
+   * Bring a group to front
+   * @param {string} groupId - The group ID
+   */
+  async _bringGroupToFront(groupId) {
+    try {
+      await MurderBoardData.bringGroupToFront(groupId);
+      
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('bringGroupToFront', {
+          groupId: groupId,
+        });
+      }
+      
+      this.renderer.refresh();
+      this.renderer.draw();
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.GroupBroughtToFront') || 'Group brought to front');
+    } catch (error) {
+      console.error('Murder Board | Error bringing group to front:', error);
+      this._notify('Failed to bring group to front', 'error');
+    }
+  }
+
+  /**
+   * Send a group to back
+   * @param {string} groupId - The group ID
+   */
+  async _sendGroupToBack(groupId) {
+    try {
+      await MurderBoardData.sendGroupToBack(groupId);
+      
+      // Emit socket message for multiplayer sync
+      if (!game.user.isGM) {
+        emitSocketMessage('sendGroupToBack', {
+          groupId: groupId,
+        });
+      }
+      
+      this.renderer.refresh();
+      this.renderer.draw();
+      this._notify(game.i18n.localize('MURDER_BOARD.Notifications.GroupSentToBack') || 'Group sent to back');
+    } catch (error) {
+      console.error('Murder Board | Error sending group to back:', error);
+      this._notify('Failed to send group to back', 'error');
     }
   }
 
@@ -4099,46 +6025,132 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
 
   /**
    * Import board data from JSON file
+   * ALWAYS creates a new board for imported content
    */
   async _onImportBoard() {
     return new Promise((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = '.json';
+      
       input.onchange = async (e) => {
         try {
           const file = e.target.files[0];
-          if (!file) return resolve();
+          if (!file) {
+            console.log('Murder Board | Import cancelled by user');
+            return resolve();
+          }
           
-          const text = await file.text();
+          console.log('Murder Board | Importing file:', file.name);
+          
+          // Read file using FileReader for better browser compatibility
+          const text = await new Promise((fileResolve, fileReject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => fileResolve(event.target.result);
+            reader.onerror = (error) => fileReject(error);
+            reader.readAsText(file);
+          });
+          
           const data = JSON.parse(text);
+          console.log('Murder Board | Parsed JSON data:', data);
           
           // Validate data structure
           if (!data.items || !Array.isArray(data.items)) {
-            throw new Error('Invalid board data format');
+            throw new Error('Invalid board data format: items must be an array');
           }
           
-          // Import the board data
-          await MurderBoardData.importBoard(this.scene, data);
+          if (!Array.isArray(data.connections)) {
+            throw new Error('Invalid board data format: connections must be an array');
+          }
+          
+          // Create a NEW board for the imported content
+          const boardId = foundry.utils.randomID();
+          const fileName = file.name.replace('.json', '');
+          const dateStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
+          
+          const newBoard = {
+            id: boardId,
+            sceneId: this.scene.id,
+            name: data.name ? `${data.name} - Imported ${dateStr}` : `Imported - ${fileName}`,
+            boardType: data.boardType || 'whiteboard',
+            defaultConnectionColor: data.defaultConnectionColor || MurderBoardData.getDefaultConnectionColorForBoardType(data.boardType || 'whiteboard'),
+            items: data.items,
+            connections: data.connections,
+            camera: { x: 0, y: 0, zoom: 1 },
+          };
+          
+          // Copy optional board settings
+          if (data.canvasColor) newBoard.canvasColor = data.canvasColor;
+          if (data.backgroundImage) newBoard.backgroundImage = data.backgroundImage;
+          if (data.backgroundScale !== undefined) newBoard.backgroundScale = data.backgroundScale;
+          
+          console.log('Murder Board | Creating new board:', boardId, 'with', data.items.length, 'items and', data.connections.length, 'connections');
+          
+          // Add to global boards
+          await MurderBoardData.createGlobalBoard(newBoard);
+          await MurderBoardData.setGlobalCurrentBoardId(boardId);
+          
+          // Create the board folder for storing images
+          try {
+            const parentPath = 'murder-board-uploads';
+            try {
+              await foundry.applications.apps.FilePicker.implementation.createDirectory('data', parentPath);
+            } catch (error) {
+              // Ignore EEXIST errors (directory already exists)
+              if (error.code !== 'EEXIST' && !error.message?.includes('EEXIST')) {
+                throw error;
+              }
+            }
+            
+            const boardFolderPath = `murder-board-uploads/${boardId}`;
+            await foundry.applications.apps.FilePicker.implementation.createDirectory('data', boardFolderPath);
+          } catch (error) {
+            console.warn('Murder Board | Could not create board folder:', error?.message || error);
+            // Don't block board creation if folder creation fails
+          }
           
           // Emit socket message for multiplayer sync
           if (!game.user.isGM) {
+            console.log('Murder Board | Emitting importBoard socket message');
             emitSocketMessage('importBoard', {
               sceneId: this.scene.id,
-              data: data,
+              boardId: boardId,
             });
           }
           
-          this.renderer.refresh();
-          this.renderer.draw();
-          this._notify(game.i18n.localize('MURDER_BOARD.Notifications.BoardImported'));
+          this._notify(game.i18n.format('MURDER_BOARD.Notifications.BoardImported', { name: newBoard.name }));
+          console.log('Murder Board | Import completed successfully, new board created:', boardId);
+          
+          // Re-render to show the new board
+          await this.render();
+          
+          // Force canvas redraw after render completes
+          requestAnimationFrame(() => {
+            if (this.renderer) {
+              console.log('Murder Board | Forcing canvas redraw after import');
+              this.renderer.needsRedraw = true;
+              this.renderer.draw();
+            }
+          });
+          
           resolve();
         } catch (error) {
-          console.error('Error importing board:', error);
-          this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ImportFailed'), 'error');
+          console.error('Murder Board | Error importing board:', error);
+          this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ImportFailed') + ': ' + error.message, 'error');
           resolve();
         }
       };
+      
+      input.oncancel = () => {
+        console.log('Murder Board | File picker cancelled');
+        resolve();
+      };
+      
+      input.onerror = (error) => {
+        console.error('Murder Board | File picker error:', error);
+        resolve();
+      };
+      
       input.click();
     });
   }
@@ -4149,9 +6161,9 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
    */
   async _updateBoardItems(items) {
     try {
-      const boardData = MurderBoardData.getBoardData(this.scene);
+      const boardData = MurderBoardData.getGlobalBoardData();
       boardData.items = items;
-      await MurderBoardData.saveBoardData(this.scene, boardData);
+      await MurderBoardData.saveGlobalBoardData(boardData);
     } catch (error) {
       console.error('Murder Board | Error updating board items:', error);
     }
@@ -4163,9 +6175,9 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
    */
   async _updateBoardConnections(connections) {
     try {
-      const boardData = MurderBoardData.getBoardData(this.scene);
+      const boardData = MurderBoardData.getGlobalBoardData();
       boardData.connections = connections;
-      await MurderBoardData.saveBoardData(this.scene, boardData);
+      await MurderBoardData.saveGlobalBoardData(boardData);
     } catch (error) {
       console.error('Murder Board | Error updating board connections:', error);
     }
@@ -4201,8 +6213,8 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       displaySpan.textContent = selectedOption.textContent;
     }
     
-    // Simply switch to the selected board by updating currentBoardId
-    await MurderBoardData._setFlag(this.scene, 'currentBoardId', selectedBoardId);
+    // Switch to the selected board globally
+    await MurderBoardData.setGlobalCurrentBoardId(selectedBoardId);
     
     // Refresh the application to show new board
     await this.render();
@@ -4212,7 +6224,7 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
    * Action: Create new board
    */
   async _onNewBoard() {
-    if (!MurderBoardData.canUserEdit(this.scene)) {
+    if (!game.user.isGM) {
       this._notify(game.i18n.localize('MURDER_BOARD.Notifications.CannotEdit'), 'warn');
       return;
     }
@@ -4221,11 +6233,11 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
     const boardId = foundry.utils.randomID();
     const boardType = game.settings.get('murder-board', 'defaultBoardType');
     
-    // Get all boards and add new one
-    const allBoards = MurderBoardData.getAllBoards(this.scene) || [];
+    // Create new board
     const newBoard = {
       id: boardId,
-      name: `Board ${allBoards.length + 1}`,
+      sceneId: this.scene.id,
+      name: `Board ${MurderBoardData.getGlobalBoards().length + 1}`,
       boardType: boardType,
       defaultConnectionColor: MurderBoardData.getDefaultConnectionColorForBoardType(boardType),
       items: [],
@@ -4233,11 +6245,9 @@ export class MurderBoardApplication extends HandlebarsApplicationMixin(Applicati
       camera: { x: 0, y: 0, zoom: 1 },
     };
     
-    allBoards.push(newBoard);
-    
-    // Save all boards and switch to new one
-    await MurderBoardData.setAllBoards(this.scene, allBoards);
-    await this.scene.setFlag('murder-board', 'currentBoardId', boardId);
+    // Add to global boards
+    await MurderBoardData.createGlobalBoard(newBoard);
+    await MurderBoardData.setGlobalCurrentBoardId(boardId);
     
     // Create the board folder for storing images
     try {
@@ -4318,11 +6328,11 @@ class ItemTypeSelectionDialog extends foundry.applications.api.ApplicationV2 {
   async _onRender(context, options) {
     // Attach button handlers
     this.element.querySelectorAll('[data-type]').forEach(button => {
-      // Click handler - opens dialog immediately
-      button.addEventListener('click', (e) => {
+      // Click handler - creates item directly with defaults
+      button.addEventListener('click', async (e) => {
         e.preventDefault();
         const type = button.dataset.type;
-        this.parentApp._openItemDialog(type);
+        await this.parentApp._createItemWithDefaults(type);
         this.close();
       });
 
@@ -4461,19 +6471,29 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
   };
 
   async _prepareContext(options) {
-    const boardData = MurderBoardData.getBoardData(this.scene);
+    const boardData = MurderBoardData.getGlobalBoardData();
     const permissions = MurderBoardData.getPermissions(this.scene);
 
-    let playerCheckboxes = '';
+    let playerPermissionTable = '';
     game.users.forEach((user) => {
       if (!user.isGM) {
-        const isRestricted = permissions.restrictedPlayers?.includes(user.id);
-        const checkId = `restrict-player-${user.id}`;
-        playerCheckboxes += `
-          <label class="checkbox-label">
-            <input type="checkbox" id="${checkId}" name="restricted-player" value="${user.id}" ${isRestricted ? 'checked' : ''} />
-            ${user.name}
-          </label>
+        const isRestrictedEdit = permissions.restrictedPlayers?.includes(user.id);
+        const isRestrictedView = permissions.restrictedViewers?.includes(user.id);
+        
+        // For the table, we want to show "NOT restricted" (can view/edit) as checked
+        const canView = !isRestrictedView;
+        const canEdit = !isRestrictedEdit && canView; // Can only edit if can view
+        
+        playerPermissionTable += `
+          <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+            <td style="padding: 8px;">${user.name}</td>
+            <td style="text-align: center; padding: 8px;">
+              <input type="checkbox" class="permission-view" name="permission-view" value="${user.id}" ${canView ? 'checked' : ''} />
+            </td>
+            <td style="text-align: center; padding: 8px;">
+              <input type="checkbox" class="permission-edit" name="permission-edit" value="${user.id}" ${canEdit ? 'checked' : ''} ${!canView ? 'disabled' : ''} />
+            </td>
+          </tr>
         `;
       }
     });
@@ -4493,16 +6513,19 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
 
     return {
       boardName: boardData.name || '',
-      allowPlayersToEdit: permissions.allowPlayersToEdit || false,
-      playerCheckboxes: playerCheckboxes,
-      canDeleteBoard: MurderBoardData.getAllBoards(this.scene).length > 1,
+      playerPermissionTable: playerPermissionTable,
+      canDeleteBoard: MurderBoardData.getGlobalBoards().length > 1,
       defaultConnectionColor: boardData.defaultConnectionColor || '#000000',
+      defaultConnectionSize: boardData.defaultConnectionSize || 5,
       canvasColor: boardData.canvasColor || MurderBoardData.getDefaultCanvasColorForBoardType(boardData.boardType || 'whiteboard'),
       connectionColors: colorOptions,
       backgroundImage: boardData.backgroundImage || '',
       backgroundMode: boardData.backgroundMode || 'content',
       backgroundScale: boardData.backgroundScale || 1.0,
       recentColors: window.game.murderBoard.ColorManager.getColorPalette(),
+      defaultFont: boardData.defaultFont || 'Arial',
+      defaultFontColor: boardData.defaultFontColor || '#000000',
+      availableFonts: this.parentApp._getAvailableFonts(),
     };
   }
 
@@ -4520,25 +6543,9 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
       }
     }
 
-    const exportBtn = content.querySelector('[data-action="export"]');
-    const importBtn = content.querySelector('[data-action="import"]');
     const saveBtn = content.querySelector('[data-action="save"]');
     const deleteBtn = content.querySelector('[data-action="delete"]');
     const cancelBtn = content.querySelector('[data-action="cancel"]');
-
-    if (exportBtn) {
-      exportBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        await this.parentApp._onExportBoard();
-      });
-    }
-
-    if (importBtn) {
-      importBtn.addEventListener('click', async (e) => {
-        e.preventDefault();
-        await this.parentApp._onImportBoard();
-      });
-    }
 
     if (saveBtn) {
       saveBtn.addEventListener('click', async (e) => {
@@ -4561,6 +6568,73 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
       });
     }
 
+    // Add toggle button handlers for permissions table
+    const toggleViewAll = content.querySelector('#toggle-view-all');
+    const toggleViewNone = content.querySelector('#toggle-view-none');
+    const toggleEditAll = content.querySelector('#toggle-edit-all');
+    const toggleEditNone = content.querySelector('#toggle-edit-none');
+
+    if (toggleViewAll) {
+      toggleViewAll.addEventListener('click', (e) => {
+        e.preventDefault();
+        content.querySelectorAll('input.permission-view').forEach(checkbox => {
+          checkbox.checked = true;
+          checkbox.disabled = false;
+        });
+        // Also enable corresponding edit checkboxes
+        content.querySelectorAll('input.permission-edit').forEach(checkbox => {
+          checkbox.disabled = false;
+        });
+      });
+    }
+    if (toggleViewNone) {
+      toggleViewNone.addEventListener('click', (e) => {
+        e.preventDefault();
+        content.querySelectorAll('input.permission-view').forEach(checkbox => {
+          checkbox.checked = false;
+        });
+        // Also uncheck and disable corresponding edit checkboxes
+        content.querySelectorAll('input.permission-edit').forEach(checkbox => {
+          checkbox.checked = false;
+          checkbox.disabled = true;
+        });
+      });
+    }
+    if (toggleEditAll) {
+      toggleEditAll.addEventListener('click', (e) => {
+        e.preventDefault();
+        content.querySelectorAll('input.permission-edit:not(:disabled)').forEach(checkbox => {
+          checkbox.checked = true;
+        });
+      });
+    }
+    if (toggleEditNone) {
+      toggleEditNone.addEventListener('click', (e) => {
+        e.preventDefault();
+        content.querySelectorAll('input.permission-edit:not(:disabled)').forEach(checkbox => {
+          checkbox.checked = false;
+        });
+      });
+    }
+
+    // Add event listeners to sync view/edit permissions
+    content.querySelectorAll('input.permission-view').forEach(viewCheckbox => {
+      viewCheckbox.addEventListener('change', (e) => {
+        // Find the corresponding edit checkbox in the same row
+        const row = viewCheckbox.closest('tr');
+        const editCheckbox = row.querySelector('input.permission-edit');
+        
+        if (!e.target.checked) {
+          // If view is unchecked, uncheck and disable edit
+          editCheckbox.checked = false;
+          editCheckbox.disabled = true;
+        } else {
+          // If view is checked, enable edit (but don't change its state)
+          editCheckbox.disabled = false;
+        }
+      });
+    });
+
     // Initialize file pickers for background image
     this._initializeFilePickers();
 
@@ -4576,6 +6650,16 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
         scaleValueDisplay.textContent = parseFloat(e.target.value).toFixed(1);
       });
     }
+
+    // Connection size slider handler
+    const connectionSizeInput = content.querySelector('#connection-size');
+    const sizeValueDisplay = content.querySelector('#size-value');
+
+    if (connectionSizeInput && sizeValueDisplay) {
+      connectionSizeInput.addEventListener('input', (e) => {
+        sizeValueDisplay.textContent = e.target.value;
+      });
+    }
   }
 
   async _handleSave() {
@@ -4583,9 +6667,22 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
     if (!content) return;
 
     const boardName = content.querySelector('#board-name')?.value;
-    const allowPlayersToEdit = content.querySelector('#allow-players-edit')?.checked;
-    const restrictedPlayerCheckboxes = content.querySelectorAll('input[name="restricted-player"]:checked');
-    const restrictedPlayers = Array.from(restrictedPlayerCheckboxes).map(cb => cb.value);
+    
+    // Extract from table: "can view" checked means NOT restricted
+    const uncheckedViewCheckboxes = content.querySelectorAll('input.permission-view:not(:checked)');
+    const restrictedViewers = Array.from(uncheckedViewCheckboxes).map(cb => cb.value);
+    
+    // Extract from table: "can edit" checked means NOT restricted
+    const uncheckedEditCheckboxes = content.querySelectorAll('input.permission-edit:not(:checked)');
+    const restrictedPlayers = Array.from(uncheckedEditCheckboxes).map(cb => cb.value);
+    
+    // Auto-determine allow flags: if any restrictions exist, set to true (allow players, then restrict specific ones)
+    // If all are allowed, set to true. If all are restricted, set to false.
+    const allPlayers = Array.from(content.querySelectorAll('input.permission-edit')).map(cb => cb.value);
+    const allowPlayersToEdit = restrictedPlayers.length < allPlayers.length; // true if at least one can edit
+    
+    const allViewers = Array.from(content.querySelectorAll('input.permission-view')).map(cb => cb.value);
+    const allowPlayersToView = restrictedViewers.length < allViewers.length; // true if at least one can view
     
     // Get connection color (radio or hidden input)
     let defaultConnectionColor = content.querySelector('input[name="connection-color"]:checked')?.value;
@@ -4603,11 +6700,50 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
     
     const backgroundImage = content.querySelector('#background-image')?.value?.trim() || null;
 
-    const boardData = MurderBoardData.getBoardData(this.scene);
+    // Get default font from the select
+    const defaultFont = content.querySelector('select[name="default-font"]')?.value || 'Arial';
+
+    const boardData = MurderBoardData.getGlobalBoardData();
+    
+    // Get default font color (radio button or hidden input from custom color picker)
+    let defaultFontColor = content.querySelector('input[name="default-font-color"]:checked')?.value;
+    if (!defaultFontColor) {
+      const hiddenFontColor = content.querySelector('input[name="default-font-color"][type="hidden"]');
+      defaultFontColor = hiddenFontColor?.value;
+    }
+    
+    // Fall back to current board value if nothing extracted
+    if (!defaultFontColor) {
+      defaultFontColor = boardData.defaultFontColor || '#000000';
+    }
+    
+    console.log('Murder Board | Saving board settings. defaultFontColor:', defaultFontColor);
+    console.log('Murder Board | Current boardData.id:', boardData.id);
+    console.log('Murder Board | Current boardData keys:', Object.keys(boardData));
+    
     boardData.name = boardName;
     boardData.canvasColor = canvasColor;
     boardData.backgroundImage = backgroundImage;
     boardData.backgroundScale = parseFloat(content.querySelector('#background-scale')?.value) || 1.0;
+    boardData.defaultConnectionSize = parseInt(content.querySelector('#connection-size')?.value) || 5;
+    boardData.defaultFont = defaultFont;
+    boardData.defaultFontColor = defaultFontColor;
+    
+    console.log('Murder Board | Board data after setting defaults:', boardData.defaultFont, boardData.defaultFontColor);
+    console.log('Murder Board | boardData object:', JSON.stringify({defaultFont: boardData.defaultFont, defaultFontColor: boardData.defaultFontColor}));
+    
+    // Add to color palette for future use
+    if (defaultFontColor) {
+      window.game.murderBoard.ColorManager.addColorToPalette(defaultFontColor);
+    }
+    
+    // Set permissions directly on board data
+    boardData.permissions = {
+      allowPlayersToEdit,
+      restrictedPlayers,
+      allowPlayersToView,
+      restrictedViewers,
+    };
     
     if (defaultConnectionColor) {
       boardData.defaultConnectionColor = defaultConnectionColor;
@@ -4617,12 +6753,11 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
       window.game.murderBoard.ColorManager.addColorToPalette(canvasColor);
     }
 
-    await MurderBoardData.saveBoardData(this.scene, boardData);
+    await MurderBoardData.saveGlobalBoardData(boardData);
 
-    await MurderBoardData.updatePermissions(this.scene, {
-      allowPlayersToEdit,
-      restrictedPlayers,
-    });
+    console.log('Murder Board | After save, checking if defaultFontColor persisted...');
+    const checkBoardData = MurderBoardData.getGlobalBoardData();
+    console.log('Murder Board | Reloaded boardData.defaultFontColor:', checkBoardData.defaultFontColor);
 
     // Refresh UI
     await this.parentApp.render();
@@ -4645,30 +6780,37 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
   }
 
   async _handleDelete() {
-    const boardData = MurderBoardData.getBoardData(this.scene);
-    const allBoards = MurderBoardData.getAllBoards(this.scene);
+    const boardData = MurderBoardData.getGlobalBoardData();
+    const allBoards = MurderBoardData.getGlobalBoards();
 
     if (allBoards.length <= 1) {
       ui.notifications.warn('Cannot delete the only board');
       return;
     }
 
-    // Confirmation dialog
-    Dialog.confirm({
-      title: 'Delete Board',
+    // Confirmation dialog using ApplicationV2
+    const confirmed = await foundry.applications.api.DialogV2.confirm({
+      window: { title: 'Delete Board' },
       content: `<p>Are you sure you want to delete "${boardData.name || 'Untitled Board'}"? This cannot be undone.</p>`,
-      yes: async () => {
-        const success = await MurderBoardData.deleteBoard(this.scene, boardData.id);
-        if (success) {
-          ui.notifications.info('Board deleted');
-          await this.parentApp.render();
-          this.close();
-        } else {
-          this._notify('Failed to delete board', 'error');
-        }
-      },
-      no: () => {},
+      rejectClose: false,
+      modal: true,
     });
+
+    if (confirmed) {
+      try {
+        await MurderBoardData.deleteGlobalBoard(boardData.id);
+        ui.notifications.info('Board deleted');
+        // Close the settings dialog and wait for it
+        await this.close();
+        // Small delay to ensure dialog is fully closed
+        await new Promise(resolve => setTimeout(resolve, 100));
+        // Then refresh the parent app to update board selector and canvas
+        await this.parentApp.render();
+      } catch (error) {
+        console.error('Murder Board | Error deleting board:', error);
+        ui.notifications.error('Failed to delete board: ' + error.message);
+      }
+    }
   }
 
   /**
@@ -4750,7 +6892,7 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
           inputField.dispatchEvent(new Event('change', { bubbles: true }));
         },
       };
-      const picker = new FilePicker(pickerOptions);
+      const picker = new foundry.applications.apps.FilePicker.implementation(pickerOptions);
       picker.browse();
     } catch (error) {
       console.error('Murder Board | Error opening file picker:', error);
@@ -4801,5 +6943,109 @@ class BoardSettingsDialog extends HandlebarsApplicationMixin(foundry.application
     });
   }
 
+  /**
+   * Show board information (items, connections, settings)
+   * Logs to console for easy inspection
+   * @public
+   */
+  showBoardInfo() {
+    const boardData = MurderBoardData.getGlobalBoardData();
+    
+    const info = {
+      'Board Name': boardData.name,
+      'Board ID': boardData.id,
+      'Board Type': boardData.boardType,
+      'Item Count': boardData.items.length,
+      'Connection Count': boardData.connections.length,
+      'Group Count': boardData.groups?.length || 0,
+      'Canvas Color': boardData.canvasColor,
+      'Default Connection Color': boardData.defaultConnectionColor,
+      'Default Connection Size': boardData.defaultConnectionSize,
+      'Camera Position': `X: ${boardData.camera?.x || 0}, Y: ${boardData.camera?.y || 0}`,
+      'Camera Zoom': boardData.camera?.zoom || 1,
+    };
+
+    console.log('%c=== Murder Board Info ===', 'color: #ff6b6b; font-weight: bold; font-size: 14px;');
+    console.table(info);
+    console.log('Full Board Data:', boardData);
+  }
+
+  /**
+   * Show detailed board diagnostics
+   * Includes item and connection details
+   * @public
+   */
+  showBoardDiagnostics() {
+    const boardData = MurderBoardData.getGlobalBoardData();
+    
+    console.log('%c=== Murder Board Diagnostics ===', 'color: #4ecdc4; font-weight: bold; font-size: 14px;');
+    
+    // Board level info
+    console.log('%cBoard Summary:', 'font-weight: bold; color: #95e1d3;');
+    console.log(`Name: ${boardData.name} (ID: ${boardData.id})`);
+    console.log(`Type: ${boardData.boardType}`);
+    console.log(`Items: ${boardData.items.length} | Connections: ${boardData.connections.length} | Groups: ${boardData.groups?.length || 0}`);
+    
+    // Items breakdown
+    if (boardData.items.length > 0) {
+      console.log('%cItems:', 'font-weight: bold; color: #f38181;');
+      const itemsByType = {};
+      boardData.items.forEach(item => {
+        if (!itemsByType[item.type]) itemsByType[item.type] = [];
+        itemsByType[item.type].push(item);
+      });
+      
+      Object.entries(itemsByType).forEach(([type, items]) => {
+        console.log(`  ${type}: ${items.length} item(s)`);
+        console.table(items.map(i => ({
+          'ID': i.id,
+          'Label': i.label,
+          'X': i.x,
+          'Y': i.y,
+          'Color': i.color,
+          'GroupId': i.groupId || 'none',
+        })));
+      });
+    } else {
+      console.log('%cNo items on this board', 'color: #999; font-style: italic;');
+    }
+    
+    // Connections breakdown
+    if (boardData.connections.length > 0) {
+      console.log('%cConnections:', 'font-weight: bold; color: #aa96da;');
+      console.table(boardData.connections.map(c => ({
+        'ID': c.id,
+        'From': c.fromItem,
+        'To': c.toItem,
+        'Color': c.color,
+        'Label': c.label || '(none)',
+      })));
+    } else {
+      console.log('%cNo connections on this board', 'color: #999; font-style: italic;');
+    }
+    
+    // Groups breakdown
+    if (boardData.groups && boardData.groups.length > 0) {
+      console.log('%cGroups:', 'font-weight: bold; color: #fcbad3;');
+      console.table(boardData.groups.map(g => ({
+        'ID': g.id,
+        'Item Count': g.itemIds?.length || 0,
+        'Color': g.color || 'none',
+      })));
+    }
+    
+    // Camera state
+    console.log('%cCamera State:', 'font-weight: bold; color: #a8dadc;');
+    console.table({
+      'X Position': boardData.camera?.x || 0,
+      'Y Position': boardData.camera?.y || 0,
+      'Zoom Level': boardData.camera?.zoom || 1,
+    });
+    
+    console.log('%cFull Board Data:', 'font-weight: bold; color: #e0aaff;');
+    console.log(boardData);
+  }
 
 }
+
+

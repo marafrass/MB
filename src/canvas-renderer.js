@@ -19,18 +19,22 @@ export class CanvasRenderer {
     this.selectedItems = []; // Array of selected item IDs
     this.hoveredItem = null;
     this.hoveredConnection = null; // Track hovered connection
+    this.hoveredConnectionLabelId = null; // Track label item ID of hovered connection
     this.connectionPreview = null;
     this.connectionPreviewMode = false; // Track if connection preview is active
     this.connectionTargetItem = null; // Track the target item for pulsing
     this.draggedItem = null; // Track item being dragged
+    this.highlightedGroupId = null; // Track group ID to highlight all members
+    this.showGroupBorders = false; // Toggle group border visualization
     this.itemSize = 40; // Size of item squares in pixels
     this.padding = 20; // Padding around text
     this.isDirty = false; // Track if canvas needs redraw
     this.animationFrameId = null; // Track animation frame request
     this.boxSelectRect = null; // Box selection rectangle { x1, y1, x2, y2 }
+    this._connectionObjects = new Map(); // Store connection objects for reference
     // Initialize showCenter from scene flags, default to true if not set
     const savedState = scene.getFlag('murder-board', 'showCenter');
-    this.showCenter = savedState !== undefined ? savedState : true;
+    this.showCenter = savedState !== undefined ? savedState : false;
     
     // Performance optimizations
     this.textMeasureCache = new Map(); // Cache text measurements to avoid repeated calls
@@ -176,7 +180,48 @@ export class CanvasRenderer {
    * @returns {Object} Board data
    */
   _getBoardData() {
-    return MurderBoardData.getBoardData(this.scene);
+    const boardData = MurderBoardData.getGlobalBoardData();
+    // Apply data migrations to old items
+    this._migrateOldItemData(boardData);
+    return boardData;
+  }
+
+  /**
+   * Migrate old item data that uses preset-based dimensions
+   * Old image items with preset sizes have their dimensions backed up but cleared
+   * so they recalculate based on actual image aspect ratio
+   * Only migrate items that haven't been migrated before (check _migrationApplied flag)
+   * @param {Object} boardData - The board data object
+   * @private
+   */
+  _migrateOldItemData(boardData) {
+    if (!boardData.items) return;
+
+    let needsUpdate = false;
+
+    for (const item of boardData.items) {
+      // Check if this is an old Image item with stored dimensions that hasn't been migrated yet
+      if (item.type === 'Image' && !item._migrationApplied && item.data?.width !== undefined && item.data?.height !== undefined) {
+        // Backup old dimensions for posterity before clearing them
+        item.data._oldWidth = item.data.width;
+        item.data._oldHeight = item.data.height;
+        
+        // Clear dimensions to force recalculation based on actual image aspect ratio
+        delete item.data.width;
+        delete item.data.height;
+        item._migrationApplied = true;
+        needsUpdate = true;
+      }
+    }
+
+    // If we migrated any items, save the updated data to persist the fix
+    if (needsUpdate && this.scene && game.user.isGM) {
+      // Save synchronously to ensure data is updated
+      const sceneId = this.scene.id;
+      MurderBoardData._setFlag(this.scene, 'items', boardData.items).catch(err => {
+        console.warn('Murder Board | Error saving migrated item data:', err);
+      });
+    }
   }
 
   /**
@@ -276,6 +321,9 @@ export class CanvasRenderer {
 
     // Get board data
     const boardData = this._getBoardData();
+    
+    // Store boardData temporarily so screen-space handles use the same migrated data
+    this._currentBoardData = boardData;
 
     // Draw connections first (so they appear behind items)
     this._drawConnections(boardData.connections, boardData.items);
@@ -342,6 +390,14 @@ export class CanvasRenderer {
       this.ctx.fill();
     }
     
+    // Draw group borders if enabled
+    if (this.showGroupBorders) {
+      const boardData = this._getBoardData();
+      if (boardData.groups && boardData.groups.length > 0) {
+        this._drawGroupBorders(boardData);
+      }
+    }
+    
     // Draw box select rectangle (in screen space, not world space)
     if (this.boxSelectRect) {
       this.ctx.restore(); // Restore to draw in screen space
@@ -365,6 +421,9 @@ export class CanvasRenderer {
       this.ctx.save();
       this.ctx.translate(this.camera.x, this.camera.y);
       this.ctx.scale(this.camera.zoom, this.camera.zoom);
+    } else {
+      // Restore context to screen space if no box select
+      this.ctx.restore();
     }
     
     // Draw center crosshair at world origin (0, 0) - moves with camera
@@ -388,6 +447,12 @@ export class CanvasRenderer {
 
     // Restore canvas state
     this.ctx.restore();
+    
+    // Draw resize handles in screen space (constant size, always on top)
+    // This must be drawn after the main restore so they appear above everything
+    if (this.selectedItems && this.selectedItems.length > 0) {
+      this._drawResizeHandlesScreenSpace(this.selectedItems);
+    }
   }  /**
    * Get background color based on canvas color setting
    * @returns {string} Color value
@@ -632,12 +697,27 @@ export class CanvasRenderer {
       const toItem = items.find(i => i.id === connection.toItem);
 
       if (fromItem && toItem) {
-        const isHovered = this.hoveredConnection && 
+        // Viewport culling: skip connections where both endpoints are off-screen
+        const fromVisible = this._isItemInViewport(fromItem.x, fromItem.y, 40, 40);
+        const toVisible = this._isItemInViewport(toItem.x, toItem.y, 40, 40);
+        
+        if (!fromVisible && !toVisible) {
+          return; // Skip this connection - both endpoints off-screen
+        }
+        
+        const isConnectionHovered = this.hoveredConnection && 
           this.hoveredConnection.fromItem === connection.fromItem && 
           this.hoveredConnection.toItem === connection.toItem;
+        
+        // Also hover if the label item is hovered
+        const isLabelHovered = connection.labelItemId && this.hoveredItem === connection.labelItemId;
+        const isHovered = isConnectionHovered || isLabelHovered;
+        
         // Use connection's width if set, otherwise use default thickness of 2
         const thickness = connection.width || 2;
-        this._drawConnection(fromItem, toItem, connection.color, thickness, connection.label, isHovered);
+        // Store the connection object for future reference
+        this._connectionObjects.set(connection.id, connection);
+        this._drawConnection(fromItem, toItem, connection.color, thickness, isHovered, connection);
       }
     });
   }
@@ -648,10 +728,10 @@ export class CanvasRenderer {
    * @param {Object} toItem - Target item
    * @param {string} color - Line color
    * @param {number} thickness - Line thickness
-   * @param {string} label - Connection label
    * @param {boolean} isHovered - Whether connection is hovered
+   * @param {Object} connection - The connection object itself
    */
-  _drawConnection(fromItem, toItem, color, thickness, label, isHovered = false) {
+  _drawConnection(fromItem, toItem, color, thickness, isHovered = false, connection = null) {
     const centerFrom = this._getItemCenter(fromItem);
     const centerTo = this._getItemCenter(toItem);
     
@@ -686,17 +766,6 @@ export class CanvasRenderer {
     // Draw glow effect if hovered (based on board type)
     if (isHovered) {
       this._drawConnectionGlowCurved(from, to, cp1x, cp1y, cp2x, cp2y, color, thickness);
-    }
-
-    // Draw label if present
-    if (label) {
-      // Position label at a point along the curve (around 50%)
-      const t = 0.5;
-      const mt = 1 - t;
-      const labelX = mt*mt*mt * from.x + 3*mt*mt*t * cp1x + 3*mt*t*t * cp2x + t*t*t * to.x;
-      const labelY = mt*mt*mt * from.y + 3*mt*mt*t * cp1y + 3*mt*t*t * cp2y + t*t*t * to.y;
-      // Offset label slightly above to avoid overlap with line
-      this._drawText(label, labelX, labelY - 15, '#000000', 'center', 12);
     }
   }
 
@@ -912,11 +981,35 @@ export class CanvasRenderer {
    * @param {Array} items - Item array
    */
   _drawItems(items) {
+    // Sort items by group first, then by z-index within group
+    const boardData = MurderBoardData.getGlobalBoardData();
+    const groups = boardData.groups || [];
+    
+    // Create a map of groupId to group z-index for sorting
+    const groupZIndexMap = new Map();
+    groups.forEach(group => {
+      groupZIndexMap.set(group.id, group.zIndex || 0);
+    });
+
+    // Sort items: first by group z-index, then by individual z-index within group
+    const sortedItems = [...items].sort((a, b) => {
+      const aGroupZ = a.groupId ? groupZIndexMap.get(a.groupId) || 0 : 0;
+      const bGroupZ = b.groupId ? groupZIndexMap.get(b.groupId) || 0 : 0;
+      
+      // If different group z-index, sort by that
+      if (aGroupZ !== bGroupZ) {
+        return aGroupZ - bGroupZ;
+      }
+      
+      // If same group (or both ungrouped), sort by individual z-index
+      return (a.zIndex || 0) - (b.zIndex || 0);
+    });
+    
     // Create a Set from selectedItems for O(1) lookup instead of O(n)
     const selectedSet = new Set(this.selectedItems);
     if (this.selectedItem) selectedSet.add(this.selectedItem);
 
-    items.forEach(item => {
+    sortedItems.forEach(item => {
       // Frustum culling: skip items that are completely off-screen
       if (!this._isItemInViewport(item.x, item.y, 40, 40)) {
         return; // Skip this item
@@ -924,7 +1017,8 @@ export class CanvasRenderer {
       
       const isSelected = selectedSet.has(item.id);
       const isHovered = item.id === this.hoveredItem;
-      this._drawItem(item, isSelected, isHovered);
+      const isConnectionLabelHovered = item.id === this.hoveredConnectionLabelId;
+      this._drawItem(item, isSelected, isHovered || isConnectionLabelHovered);
     });
 
     // Draw dragged item last (appears on top) - always draw if being dragged
@@ -935,6 +1029,148 @@ export class CanvasRenderer {
         this._drawItem(draggedItemData, isSelected, false);
       }
     }
+  }
+
+  /**
+   * Get the color for a group by ID
+   * @param {string} groupId - The group ID
+   * @returns {string} The color hex code
+   * @private
+   */
+  _getGroupColor(groupId) {
+    const groupColors = [
+      '#FF6B6B', // Red
+      '#4ECDC4', // Teal
+      '#FFE66D', // Yellow
+      '#95E1D3', // Mint
+      '#F38181', // Pink
+      '#AA96DA', // Purple
+      '#FCBAD3', // Light Pink
+      '#A8D8EA', // Light Blue
+      '#FFD3B6', // Peach
+      '#FFAAA5', // Salmon
+    ];
+    
+    const boardData = MurderBoardData.getGlobalBoardData();
+    const groups = boardData.groups || [];
+    const groupIndex = groups.findIndex(g => g.id === groupId);
+    
+    return groupIndex >= 0 ? groupColors[groupIndex % groupColors.length] : null;
+  }
+
+  /**
+   * Draw colored borders around each group
+   * @param {Object} boardData - Board data containing items and groups
+   * @private
+   */
+  _drawGroupBorders(boardData) {
+    const items = boardData.items || [];
+    const groups = boardData.groups || [];
+    
+    groups.forEach((group) => {
+      const groupItems = items.filter(item => item.groupId === group.id);
+      if (groupItems.length === 0) return;
+      
+      const borderColor = this._getGroupColor(group.id);
+      if (!borderColor) return;
+      
+      // Calculate bounding box around all items in group
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      
+      groupItems.forEach(item => {
+        const x = item.x || 0;
+        const y = item.y || 0;
+        const { width: itemWidth, height: itemHeight } = this._getItemDimensions(item);
+        
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x + itemWidth);
+        maxY = Math.max(maxY, y + itemHeight);
+      });
+      
+      if (!isFinite(minX) || !isFinite(maxX)) return;
+      
+      // Add padding around group border
+      const padding = 15;
+      minX -= padding;
+      minY -= padding;
+      maxX += padding;
+      maxY += padding;
+      
+      // Draw border
+      this.ctx.strokeStyle = borderColor;
+      this.ctx.lineWidth = 3 / this.camera.zoom;
+      this.ctx.setLineDash([10 / this.camera.zoom, 5 / this.camera.zoom]);
+      this.ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+      this.ctx.setLineDash([]);
+      
+      // Draw group name label
+      if (group.name) {
+        const labelX = minX + 10;
+        const labelY = minY - 5;
+        
+        // Background for label
+        this.ctx.save();
+        this.ctx.fillStyle = borderColor;
+        this.ctx.globalAlpha = 0.8;
+        
+        const fontSize = 12 / this.camera.zoom;
+        this.ctx.font = `${fontSize}px Arial`;
+        const textMetrics = this.ctx.measureText(group.name);
+        const labelPadding = 5 / this.camera.zoom;
+        
+        this.ctx.fillRect(
+          labelX - labelPadding,
+          labelY - fontSize - labelPadding,
+          textMetrics.width + labelPadding * 2,
+          fontSize + labelPadding * 2
+        );
+        
+        // Text
+        this.ctx.fillStyle = '#FFFFFF';
+        this.ctx.globalAlpha = 1;
+        this.ctx.textBaseline = 'bottom';
+        this.ctx.fillText(group.name, labelX, labelY);
+        
+        this.ctx.restore();
+      }
+    });
+  }
+
+  /**
+   * Draw glow effect around an item in a group
+   * @param {number} x - X position
+   * @param {number} y - Y position
+   * @param {number} width - Item width
+   * @param {number} height - Item height
+   * @param {string} glowColor - Color for the glow
+   * @private
+   */
+  _drawItemGlow(x, y, width, height, glowColor) {
+    // Draw multiple layers of glow for smooth falloff
+    const glowLayers = [
+      { radius: 20, alpha: 0.15 },
+      { radius: 15, alpha: 0.25 },
+      { radius: 10, alpha: 0.35 },
+      { radius: 5, alpha: 0.45 },
+    ];
+    
+    glowLayers.forEach(layer => {
+      this.ctx.fillStyle = glowColor;
+      this.ctx.globalAlpha = layer.alpha;
+      
+      // Draw rounded rectangle glow
+      const radius = layer.radius / this.camera.zoom;
+      this.ctx.beginPath();
+      this.ctx.roundRect(x - radius, y - radius, width + radius * 2, height + radius * 2, radius);
+      this.ctx.fill();
+    });
+    
+    // Reset alpha
+    this.ctx.globalAlpha = 1;
   }
 
   /**
@@ -979,16 +1215,26 @@ export class CanvasRenderer {
    * @param {boolean} selected - Whether selected
    * @param {boolean} hovered - Whether hovered
    * @param {boolean} isPulsing - Whether pulsing
+   * @param {string} groupId - Group ID of the item (if any)
    * @private
    */
-  _drawItemBorder(x, y, width, height, selected, hovered, isPulsing) {
-    // Don't draw any border for unselected, unhovered items
-    if (!selected && !hovered && !isPulsing) {
+  _drawItemBorder(x, y, width, height, selected, hovered, isPulsing, groupId) {
+    const isGroupHighlighted = groupId && this.highlightedGroupId && groupId === this.highlightedGroupId;
+    
+    // Don't draw any border for unselected, unhovered items (unless part of highlighted group)
+    if (!selected && !hovered && !isPulsing && !isGroupHighlighted) {
       return;
     }
     
-    let borderColor = selected ? '#EE5A52' : (hovered ? '#FFD700' : 'rgba(0, 0, 0, 0.2)');
-    let borderWidth = selected ? 2 : (hovered ? 1.5 : 1);
+    let borderColor = selected ? '#FF0000' : (hovered ? '#FFD700' : 'rgba(0, 0, 0, 0.2)');
+    let borderWidth = selected ? 3 : (hovered ? 2 : 1);
+    
+    // Apply group highlight: softer color and dashed line
+    if (isGroupHighlighted && !selected) {
+      borderColor = 'rgba(184, 168, 255, 0.6)';
+      borderWidth = 1.5;
+      this.ctx.setLineDash([5, 5]);
+    }
     
     if (isPulsing) {
       const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
@@ -996,9 +1242,127 @@ export class CanvasRenderer {
       borderWidth = 3;
     }
     
+    // Static dotted border for selected items
+    if (selected) {
+      this.ctx.setLineDash([6, 4]);
+    }
+    
     this.ctx.strokeStyle = borderColor;
     this.ctx.lineWidth = borderWidth;
     this.ctx.strokeRect(x, y, width, height);
+    this.ctx.setLineDash([]);
+  }
+
+  /**
+   * Draw resize handles in screen space (not affected by zoom)
+   * This should be called after restoring canvas context but before final restore
+   * @param {Array} selectedItemIds - Array of selected item IDs
+   * @private
+   */
+  _drawResizeHandlesScreenSpace(selectedItemIds) {
+    if (!selectedItemIds || selectedItemIds.length === 0) return;
+    
+    // Use the current board data to ensure we have migrated items with correct dimensions
+    const items = this._currentBoardData?.items || MurderBoardData.getItems(this.scene);
+    const handleSize = 12; // Always 12 pixels, regardless of zoom
+    const handleColor = '#FF0000';
+    const handleOutlineColor = '#FFFFFF';
+    const outlineWidth = 2;
+
+    selectedItemIds.forEach(itemId => {
+      const item = items.find(i => i.id === itemId);
+      if (!item) return;
+
+      const itemX = item.x || 0;
+      const itemY = item.y || 0;
+      const { width: itemWidth, height: itemHeight } = this._getItemDimensions(item);
+      
+      // Convert world coordinates to screen coordinates
+      const screenX = this.camera.x + itemX * this.camera.zoom;
+      const screenY = this.camera.y + itemY * this.camera.zoom;
+      const screenWidth = itemWidth * this.camera.zoom;
+      const screenHeight = itemHeight * this.camera.zoom;
+      
+      const rotation = item.rotation || 0;
+      const centerX = screenX + screenWidth / 2;
+      const centerY = screenY + screenHeight / 2;
+      const cos = Math.cos(rotation * Math.PI / 180);
+      const sin = Math.sin(rotation * Math.PI / 180);
+
+      // Corner positions relative to center
+      const corners = [
+        { relX: -screenWidth / 2, relY: -screenHeight / 2 }, // Top-left
+        { relX: screenWidth / 2, relY: -screenHeight / 2 },  // Top-right
+        { relX: -screenWidth / 2, relY: screenHeight / 2 },  // Bottom-left
+        { relX: screenWidth / 2, relY: screenHeight / 2 },   // Bottom-right
+      ];
+
+      // Draw each handle
+      corners.forEach(corner => {
+        // Apply rotation transform
+        const rotatedX = corner.relX * cos - corner.relY * sin;
+        const rotatedY = corner.relX * sin + corner.relY * cos;
+        const handleX = centerX + rotatedX;
+        const handleY = centerY + rotatedY;
+
+        // Draw square handle with outline
+        this.ctx.fillStyle = handleColor;
+        this.ctx.fillRect(handleX - handleSize / 2, handleY - handleSize / 2, handleSize, handleSize);
+        
+        this.ctx.strokeStyle = handleOutlineColor;
+        this.ctx.lineWidth = outlineWidth;
+        this.ctx.strokeRect(handleX - handleSize / 2, handleY - handleSize / 2, handleSize, handleSize);
+      });
+      
+      // Draw rotation handle (circular, above the item)
+      const rotateHandleDistance = 30; // Distance from top edge
+      const rotateHandleSize = 14; // Slightly larger than resize handles
+      const topRelX = 0;
+      const topRelY = -screenHeight / 2 - rotateHandleDistance;
+      const rotatedTopX = topRelX * cos - topRelY * sin;
+      const rotatedTopY = topRelX * sin + topRelY * cos;
+      const rotateHandleX = centerX + rotatedTopX;
+      const rotateHandleY = centerY + rotatedTopY;
+      
+      // Draw circular rotation handle
+      this.ctx.beginPath();
+      this.ctx.arc(rotateHandleX, rotateHandleY, rotateHandleSize / 2, 0, 2 * Math.PI);
+      this.ctx.fillStyle = '#4CAF50'; // Green for rotation
+      this.ctx.fill();
+      this.ctx.strokeStyle = handleOutlineColor;
+      this.ctx.lineWidth = outlineWidth;
+      this.ctx.stroke();
+      
+      // Draw rotation icon (curved arrow)
+      this.ctx.save();
+      this.ctx.translate(rotateHandleX, rotateHandleY);
+      this.ctx.strokeStyle = '#FFFFFF';
+      this.ctx.lineWidth = 1.5;
+      this.ctx.beginPath();
+      this.ctx.arc(0, 0, 4, -Math.PI * 0.75, Math.PI * 0.75, false);
+      this.ctx.stroke();
+      // Arrow tip
+      this.ctx.beginPath();
+      this.ctx.moveTo(3, 2);
+      this.ctx.lineTo(5, 4);
+      this.ctx.lineTo(2, 5);
+      this.ctx.stroke();
+      this.ctx.restore();
+    });
+  }
+
+  /**
+   * Draw resize handles for selected items (deprecated - now drawn in screen space)
+   * @param {number} x - X position
+   * @param {number} y - Y position
+   * @param {number} width - Width
+   * @param {number} height - Height
+   * @param {number} rotation - Rotation in degrees (optional)
+   * @private
+   */
+  _drawResizeHandles(x, y, width, height, rotation = 0) {
+    // This is now a no-op since handles are drawn in screen space after context restore
+    // Keeping the method for backwards compatibility but it does nothing
   }
 
   /**
@@ -1033,11 +1397,21 @@ export class CanvasRenderer {
    * @param {boolean} selected - Whether selected
    * @param {boolean} hovered - Whether hovered
    * @param {boolean} isPulsing - Whether pulsing
+   * @param {string} groupId - Group ID of the item (if any)
    * @private
    */
-  _drawStandardItemBorder(x, y, width, height, color, selected, hovered, isPulsing) {
-    let borderColor = selected ? '#EE5A52' : (hovered ? '#FFD700' : '#333333');
-    let borderWidth = selected ? 2 : (hovered ? 1.5 : 1);
+  _drawStandardItemBorder(x, y, width, height, color, selected, hovered, isPulsing, groupId) {
+    const isGroupHighlighted = groupId && this.highlightedGroupId && groupId === this.highlightedGroupId;
+    
+    let borderColor = selected ? '#FF0000' : (hovered ? '#FFD700' : '#333333');
+    let borderWidth = selected ? 3 : (hovered ? 2 : 1);
+    
+    // Apply group highlight: softer color and dashed line
+    if (isGroupHighlighted && !selected) {
+      borderColor = 'rgba(184, 168, 255, 0.6)';
+      borderWidth = 1.5;
+      this.ctx.setLineDash([5, 5]);
+    }
     
     if (isPulsing) {
       const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
@@ -1045,9 +1419,15 @@ export class CanvasRenderer {
       borderWidth = 3;
     }
     
+    // Static dotted border for selected items
+    if (selected) {
+      this.ctx.setLineDash([6, 4]);
+    }
+    
     this.ctx.strokeStyle = borderColor;
     this.ctx.lineWidth = borderWidth;
     this.ctx.strokeRect(x, y, width, height);
+    this.ctx.setLineDash([]);
   }
 
   /**
@@ -1064,30 +1444,42 @@ export class CanvasRenderer {
   _drawNoteItem(item, x, y, color, selected, hovered, isPulsing = false) {
     this.ctx.save();
     
+    // Get custom dimensions if they exist
+    const itemWidth = item.data?.width || this.itemSize;
+    const itemHeight = item.data?.height || this.itemSize;
+    
     // Apply rotation
-    this._applyItemRotation(item, x, y, this.itemSize, this.itemSize);
+    this._applyItemRotation(item, x, y, itemWidth, itemHeight);
+
+    // Draw group glow if group borders are visible and item is in a group
+    if (this.showGroupBorders && item.groupId) {
+      const groupColor = this._getGroupColor(item.groupId);
+      if (groupColor) {
+        this._drawItemGlow(x, y, itemWidth, itemHeight, groupColor);
+      }
+    }
 
     // Draw shadow (rotates with item) unless disabled
     if (item.data?.shadow !== 'none') {
-      this._drawItemShadow(x, y);
+      this._drawItemShadow(x, y, itemWidth, itemHeight);
     }
 
     // Draw post-it background
     this.ctx.fillStyle = color;
-    this.ctx.fillRect(x, y, this.itemSize, this.itemSize);
+    this.ctx.fillRect(x, y, itemWidth, itemHeight);
 
     // Draw border using centralized helper
-    this._drawItemBorder(x, y, this.itemSize, this.itemSize, selected, hovered, isPulsing);
+    this._drawItemBorder(x, y, itemWidth, itemHeight, selected, hovered, isPulsing, item.groupId);
 
     // Draw text
     const textColor = item.data?.textColor || '#000000';
     const font = item.data?.font || 'Arial';
     
     if (item.label) {
-      const textX = x + this.itemSize / 2;
-      const textY = y + this.itemSize / 2;
-      const maxWidth = this.itemSize - 4;
-      this._drawWrappedText(item.label, textX, textY, textColor, 'center', 10, maxWidth, font, this.itemSize - 4);
+      const textX = x + itemWidth / 2;
+      const textY = y + itemHeight / 2;
+      const maxWidth = itemWidth - 4;
+      this._drawWrappedText(item.label, textX, textY, textColor, 'center', 10, maxWidth, font, itemHeight - 4);
     }
 
     this.ctx.restore();
@@ -1112,25 +1504,32 @@ export class CanvasRenderer {
     // Apply rotation
     this._applyItemRotation(item, x, y, itemWidth, itemHeight);
 
-    // Draw border using centralized helper
-    this._drawItemBorder(x, y, itemWidth, itemHeight, selected, hovered, isPulsing);
-
-    // Draw resize handles for selected items
-    if (selected) {
-      this._drawResizeHandles(x, y, itemWidth, itemHeight, item.rotation || 0);
+    // Draw group glow if group borders are visible and item is in a group
+    if (this.showGroupBorders && item.groupId) {
+      const groupColor = this._getGroupColor(item.groupId);
+      if (groupColor) {
+        this._drawItemGlow(x, y, itemWidth, itemHeight, groupColor);
+      }
     }
+
+    // Draw border using centralized helper
+    this._drawItemBorder(x, y, itemWidth, itemHeight, selected, hovered, isPulsing, item.groupId);
 
     // Draw text
     const textColor = item.data?.textColor || '#000000';
     const font = item.data?.font || 'Arial';
-    const fontSize = item.data?.fontSize || 14;
+    // Start with a very large font size and let _drawWrappedText scale it down to fit
+    // This allows text to be as large as possible within the box constraints
+    const startingFontSize = 200;
 
-    if (item.label) {
+    // Use data.text if available (new format), otherwise fall back to item.label (legacy format)
+    const textContent = item.data?.text || item.label;
+    if (textContent) {
       const textX = x + itemWidth / 2;
       const textY = y + itemHeight / 2;
       const maxWidth = itemWidth - 8;
       const maxHeight = itemHeight - 8;
-      this._drawWrappedText(item.label, textX, textY, textColor, 'center', fontSize, maxWidth, font, maxHeight);
+      this._drawWrappedText(textContent, textX, textY, textColor, 'center', startingFontSize, maxWidth, font, maxHeight);
     }
 
     this.ctx.restore();
@@ -1167,15 +1566,127 @@ export class CanvasRenderer {
    * @private
    */
   _drawImageItem(item, x, y, selected, hovered, isPulsing = false) {
-    let preset = item.data?.preset || 'medium';
-    let presetConfig = this.imagePresets[preset];
+    // Use the same dimension calculation as handles - NOT a hardcoded fallback!
+    const { width: itemWidth, height: itemHeight } = this._getItemDimensions(item);
+
+    // Try to get preset config for styling, but it's optional now
+    let preset = item.data?.preset;
+    let presetConfig = preset ? this.imagePresets[preset] : null;
     
+    // If no preset config, use basic image rendering with custom dimensions
     if (!presetConfig) {
-      // Fallback to standard item if preset not found
-      this._drawStandardItem(item, x, y, '#CCCCCC', selected, hovered, isPulsing);
+      const borderColor = item.data?.borderColor || 'white';
+      let borderFillColor = '#FFFFFF'; // white default
+      if (borderColor === 'black') {
+        borderFillColor = '#000000';
+      } else if (borderColor === 'none') {
+        borderFillColor = null;
+      }
+
+      this.ctx.save();
+
+      // Apply rotation if present
+      if (item.rotation) {
+        const centerX = x + itemWidth / 2;
+        const centerY = y + itemHeight / 2;
+        const rotationRad = (item.rotation * Math.PI) / 180;
+        this.ctx.translate(centerX, centerY);
+        this.ctx.rotate(rotationRad);
+        this.ctx.translate(-centerX, -centerY);
+      }
+
+      // Draw group glow if group borders are visible and item is in a group
+      if (this.showGroupBorders && item.groupId) {
+        const groupColor = this._getGroupColor(item.groupId);
+        if (groupColor) {
+          this._drawItemGlow(x, y, itemWidth, itemHeight, groupColor);
+        }
+      }
+
+      // Draw border/frame
+      if (borderFillColor) {
+        this.ctx.fillStyle = borderFillColor;
+        this.ctx.fillRect(x - 1, y - 1, itemWidth + 2, itemHeight + 2);
+      }
+
+      // Draw image if available, otherwise show placeholder
+      if (item.data?.imageUrl) {
+        const imageUrl = item.data.imageUrl;
+        
+        // Check if image is already cached
+        if (this.imageCache.has(imageUrl)) {
+          const cachedImg = this.imageCache.get(imageUrl);
+          if (cachedImg) {
+            // Draw cached image
+            const imgAspect = cachedImg.width / cachedImg.height;
+            const areaAspect = itemWidth / itemHeight;
+            let drawWidth, drawHeight, drawX, drawY;
+
+            if (imgAspect > areaAspect) {
+              drawWidth = itemWidth;
+              drawHeight = itemWidth / imgAspect;
+            } else {
+              drawHeight = itemHeight;
+              drawWidth = itemHeight * imgAspect;
+            }
+
+            drawX = x + (itemWidth - drawWidth) / 2;
+            drawY = y + (itemHeight - drawHeight) / 2;
+
+            this.ctx.drawImage(cachedImg, drawX, drawY, drawWidth, drawHeight);
+          }
+        } else {
+          // Load and cache image (only if not already loading)
+          if (!this.imageLoadingSet.has(imageUrl)) {
+            this.imageLoadingSet.add(imageUrl); // Mark as loading
+            const img = new Image();
+            img.crossOrigin = 'anonymous';
+            img.onload = () => {
+              this.imageCache.set(imageUrl, img);
+              this.imageLoadingSet.delete(imageUrl); // Mark as no longer loading
+              // Mark as dirty to redraw
+              this.isDirty = true;
+            };
+            img.onerror = () => {
+              console.warn('Murder Board | Failed to load image:', imageUrl);
+              this.imageLoadingSet.delete(imageUrl);
+            };
+            img.src = imageUrl;
+          }
+          // Show placeholder while loading
+          this.ctx.fillStyle = '#D0D0D0';
+          this.ctx.fillRect(x, y, itemWidth, itemHeight);
+          this.ctx.fillStyle = '#999999';
+          this.ctx.font = '12px Arial';
+          this.ctx.textAlign = 'center';
+          this.ctx.textBaseline = 'middle';
+          this.ctx.fillText('Loading...', x + itemWidth / 2, y + itemHeight / 2);
+        }
+      } else {
+        // Draw empty placeholder
+        this.ctx.fillStyle = '#E0E0E0';
+        this.ctx.fillRect(x, y, itemWidth, itemHeight);
+        this.ctx.fillStyle = '#999999';
+        this.ctx.font = '12px Arial';
+        this.ctx.textAlign = 'center';
+        this.ctx.textBaseline = 'middle';
+        this.ctx.fillText('No image', x + itemWidth / 2, y + itemHeight / 2);
+      }
+
+      // Draw selection/hover border using centralized helper
+      this._drawItemBorder(x, y, itemWidth, itemHeight, selected, hovered, isPulsing, item.groupId);
+
+      // Resize handles are drawn in screen space after context restore
+
+      // Draw fasteners before restore so they appear on top
+      const fastenerType = item.data?.fastenerType || 'pushpin';
+      this._drawFasteners(x, y, itemWidth, itemHeight, fastenerType);
+
+      this.ctx.restore();
       return;
     }
 
+    // Existing preset-based rendering for backwards compatibility
     const { longEdge, borderWidth, isPolaroid, bottomMargin } = presetConfig;
     const borderColor = item.data?.borderColor || 'white';
     
@@ -1187,32 +1698,9 @@ export class CanvasRenderer {
       borderFillColor = null;
     }
 
-    // Calculate display dimensions based on image aspect ratio
-    let width, height;
-    if (item.data?.imageUrl && this.imageCache.has(item.data.imageUrl)) {
-      const cachedImg = this.imageCache.get(item.data.imageUrl);
-      if (cachedImg) {
-        const imgAspect = cachedImg.width / cachedImg.height;
-        // Determine which dimension is the long edge
-        if (imgAspect >= 1) {
-          // Landscape: width is long edge
-          width = longEdge;
-          height = longEdge / imgAspect;
-        } else {
-          // Portrait: height is long edge
-          height = longEdge;
-          width = longEdge * imgAspect;
-        }
-      } else {
-        // Default to square if image not loaded yet
-        width = longEdge;
-        height = longEdge;
-      }
-    } else {
-      // Default to square if no image URL
-      width = longEdge;
-      height = longEdge;
-    }
+    // Use custom dimensions - no aspect ratio scaling for resized items
+    let width = itemWidth;
+    let height = itemHeight;
 
     // For Polaroid, add extra bottom margin
     let totalHeight = height;
@@ -1230,6 +1718,14 @@ export class CanvasRenderer {
       this.ctx.translate(centerX, centerY);
       this.ctx.rotate(rotationRad);
       this.ctx.translate(-centerX, -centerY);
+    }
+
+    // Draw group glow if group borders are visible and item is in a group
+    if (this.showGroupBorders && item.groupId) {
+      const groupColor = this._getGroupColor(item.groupId);
+      if (groupColor) {
+        this._drawItemGlow(x, y, width, totalHeight, groupColor);
+      }
     }
 
     // Draw shadow with image dimensions (now rotates with image) - unless shadow is disabled
@@ -1317,8 +1813,8 @@ export class CanvasRenderer {
     }
 
     // Draw selection/hover border
-    let selectionBorderColor = selected ? '#EE5A52' : '#FFD700';
-    let selectionBorderWidth = selected ? 2 : 1.5;
+    let selectionBorderColor = selected ? '#FF0000' : '#FFD700';
+    let selectionBorderWidth = selected ? 3 : 1.5;
     
     if (isPulsing) {
       const pulse = (Math.sin(Date.now() / 200) + 1) / 2;
@@ -1327,9 +1823,16 @@ export class CanvasRenderer {
     }
     
     if (selected || hovered || isPulsing) {
+      // Static dotted border for selected items
+      if (selected) {
+        this.ctx.setLineDash([6, 4]);
+      }
+      
       this.ctx.strokeStyle = selectionBorderColor;
       this.ctx.lineWidth = selectionBorderWidth;
       this.ctx.strokeRect(x - 1, y - 1, width + 2, totalHeight + 2);
+      
+      this.ctx.setLineDash([]);
     }
 
     // Draw fasteners before restore so they appear on top
@@ -1511,19 +2014,49 @@ export class CanvasRenderer {
    */
   _drawDocumentItem(item, x, y, color, selected, hovered, isPulsing = false) {
     const preset = item.data?.preset || 'blank';
-    const size = item.data?.size || 'medium';
     const rotation = (item.rotation || 0) * (Math.PI / 180); // Convert to radians
     const presetConfig = this.documentPresets[preset];
-    const sizeConfig = this.documentSizes[size];
 
-    if (!presetConfig || !sizeConfig) {
-      // Fallback to standard item if preset or size not found
-      this._drawStandardItem(item, x, y, color, selected, hovered);
+    // Get dimensions using the same logic as _getItemDimensions
+    const { width, height } = this._getItemDimensions(item);
+
+    // If no preset config found, use basic rendering
+    if (!presetConfig) {
+      this.ctx.save();
+
+      // Apply rotation around center
+      const centerX = x + width / 2;
+      const centerY = y + height / 2;
+      this.ctx.translate(centerX, centerY);
+      this.ctx.rotate(rotation);
+      this.ctx.translate(-centerX, -centerY);
+
+      // Draw group glow if group borders are visible and item is in a group
+      if (this.showGroupBorders && item.groupId) {
+        const groupColor = this._getGroupColor(item.groupId);
+        if (groupColor) {
+          this._drawItemGlow(x, y, width, height, groupColor);
+        }
+      }
+
+      // Draw background
+      this.ctx.fillStyle = color || '#F5F5F5';
+      this.ctx.fillRect(x, y, width, height);
+
+      // Draw selection/hover border using centralized helper
+      this._drawItemBorder(x, y, width, height, selected, hovered, isPulsing, item.groupId);
+
+      // Resize handles are drawn in screen space after context restore
+
+      // Draw fasteners before restore so they appear on top
+      const fastenerType = item.data?.fastenerType || 'pushpin';
+      this._drawFasteners(x, y, width, height, fastenerType);
+
+      this.ctx.restore();
       return;
     }
 
-    const { width, height } = sizeConfig;
-
+    // Existing preset-based rendering for backwards compatibility
     this.ctx.save();
 
     // Apply rotation around center
@@ -1532,6 +2065,14 @@ export class CanvasRenderer {
     this.ctx.translate(centerX, centerY);
     this.ctx.rotate(rotation);
     this.ctx.translate(-centerX, -centerY);
+
+    // Draw group glow if group borders are visible and item is in a group
+    if (this.showGroupBorders && item.groupId) {
+      const groupColor = this._getGroupColor(item.groupId);
+      if (groupColor) {
+        this._drawItemGlow(x, y, width, height, groupColor);
+      }
+    }
 
     // Draw shadow - unless shadow is disabled
     if (item.data?.shadow !== 'none') {
@@ -2132,9 +2673,17 @@ export class CanvasRenderer {
     // Apply rotation
     this._applyItemRotation(item, x, y, this.itemSize, this.itemSize);
 
+    // Draw group glow if group borders are visible and item is in a group
+    if (this.showGroupBorders && item.groupId) {
+      const groupColor = this._getGroupColor(item.groupId);
+      if (groupColor) {
+        this._drawItemGlow(x, y, this.itemSize, this.itemSize, groupColor);
+      }
+    }
+
     // Draw shadow (rotates with item) unless disabled
     if (item.data?.shadow !== 'none') {
-      this._drawItemShadow(x, y);
+      this._drawItemShadow(x, y, this.itemSize, this.itemSize);
     }
 
     // Draw item rectangle
@@ -2142,7 +2691,7 @@ export class CanvasRenderer {
     this.ctx.fillRect(x, y, this.itemSize, this.itemSize);
 
     // Draw border using standard item helper (with contrast color)
-    this._drawStandardItemBorder(x, y, this.itemSize, this.itemSize, color, selected, hovered, isPulsing);
+    this._drawStandardItemBorder(x, y, this.itemSize, this.itemSize, color, selected, hovered, isPulsing, item.groupId);
 
     this.ctx.restore();
 
@@ -2161,19 +2710,23 @@ export class CanvasRenderer {
    * @param {number} y - Item Y position
    * @private
    */
-  _drawItemShadow(x, y) {
+  _drawItemShadow(x, y, width = null, height = null) {
+    // Use provided dimensions, or fall back to itemSize
+    const w = width || this.itemSize;
+    const h = height || this.itemSize;
+    
     // Outer soft shadow - layered blur effect
     this.ctx.fillStyle = 'rgba(0, 0, 0, 0.04)';
-    this.ctx.fillRect(x + 2, y + 3, this.itemSize, this.itemSize);
+    this.ctx.fillRect(x + 2, y + 3, w, h);
     this.ctx.fillStyle = 'rgba(0, 0, 0, 0.03)';
-    this.ctx.fillRect(x + 1.5, y + 2.5, this.itemSize, this.itemSize);
+    this.ctx.fillRect(x + 1.5, y + 2.5, w, h);
     this.ctx.fillStyle = 'rgba(0, 0, 0, 0.02)';
-    this.ctx.fillRect(x + 1, y + 2, this.itemSize, this.itemSize);
+    this.ctx.fillRect(x + 1, y + 2, w, h);
 
     // Inner shadow highlight (top-left edge)
     this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
     this.ctx.lineWidth = 1;
-    this.ctx.strokeRect(x + 0.5, y + 0.5, this.itemSize - 1, this.itemSize - 1);
+    this.ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   }
 
   /**
@@ -2205,9 +2758,17 @@ export class CanvasRenderer {
     const type = item.type;
 
     if (type === 'Note') {
-      // Notes are always square (itemSize x itemSize)
+      // Check for custom dimensions first (from resizing)
+      if (item.data?.width !== undefined && item.data?.height !== undefined) {
+        return { width: item.data.width, height: item.data.height };
+      }
+      // Notes default to square (itemSize x itemSize)
       return { width: this.itemSize, height: this.itemSize };
     } else if (type === 'Image') {
+      // Check for custom dimensions first (from resizing)
+      if (item.data?.width !== undefined && item.data?.height !== undefined) {
+        return { width: item.data.width, height: item.data.height };
+      }
       // Images have variable dimensions based on preset and actual image aspect ratio
       const preset = item.data?.preset || 'medium';
       const presetConfig = this.imagePresets[preset];
@@ -2246,11 +2807,15 @@ export class CanvasRenderer {
 
       return { width, height: totalHeight };
     } else if (type === 'Document') {
-      // Documents have fixed dimensions based on size preset
-      const size = item.data?.size || 'medium';
+      // Check for custom dimensions first (from resizing or explicit settings)
+      if (item.data?.width !== undefined && item.data?.height !== undefined) {
+        return { width: item.data.width, height: item.data.height };
+      }
+      // Documents have fixed dimensions based on size preset, default to xlarge
+      const size = item.data?.size || 'xlarge';
       const sizeConfig = this.documentSizes[size];
       if (!sizeConfig) {
-        return { width: this.itemSize, height: this.itemSize }; // Fallback
+        return { width: 200, height: 260 }; // Default to xlarge dimensions
       }
       return { width: sizeConfig.width, height: sizeConfig.height };
     } else if (type === 'Text') {
@@ -2472,7 +3037,9 @@ export class CanvasRenderer {
   getItemAtPoint(x, y, tolerance = 0) {
     // Convert screen coordinates to world coordinates
     const world = this.screenToWorld(x, y);
-    const items = MurderBoardData.getItems(this.scene);
+    
+    // Use cached board data if available (performance optimization)
+    const items = this._currentBoardData?.items || MurderBoardData.getItems(this.scene);
     
     // Scale tolerance by zoom level
     const scaledTolerance = tolerance / this.camera.zoom;
@@ -2534,8 +3101,11 @@ export class CanvasRenderer {
    */
   getConnectionAtPoint(x, y, threshold = 12) {
     const world = this.screenToWorld(x, y);
-    const connections = MurderBoardData.getConnections(this.scene);
-    const items = MurderBoardData.getItems(this.scene);
+    
+    // Use cached board data if available (performance optimization)
+    const boardData = this._currentBoardData || this._getBoardData();
+    const connections = boardData.connections;
+    const items = boardData.items;
 
     // Create a map for O(1) item lookup instead of O(n) find() per connection
     const itemMap = new Map(items.map(item => [item.id, item]));
@@ -2623,10 +3193,11 @@ export class CanvasRenderer {
 
   /**
    * Set hovered connection
-   * @param {Object} connection - Connection object {fromItem, toItem} or null
+   * @param {Object} connection - Connection object {fromItem, toItem, labelItemId} or null
    */
   setHoverConnection(connection) {
     this.hoveredConnection = connection;
+    this.hoveredConnectionLabelId = connection ? connection.labelItemId : null;
   }
 
   /**
@@ -2644,6 +3215,7 @@ export class CanvasRenderer {
     this.selectedItem = null;
     this.hoveredItem = null;
     this.hoveredConnection = null;
+    this.hoveredConnectionLabelId = null;
   }
 
   /**
@@ -2764,4 +3336,6 @@ export class CanvasRenderer {
       }
     }
   }
+
+
 }

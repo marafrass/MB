@@ -82,10 +82,12 @@ export class MurderBoardData {
       };
     }
     if (!flags.permissions) {
-      // Default permissions: all players can edit
+      // Default permissions: all players can edit and view
       flags.permissions = {
         allowPlayersToEdit: true,
-        restrictedPlayers: [], // Array of user IDs to restrict
+        restrictedPlayers: [], // Array of user IDs restricted from editing
+        allowPlayersToView: true,
+        restrictedViewers: [], // Array of user IDs restricted from viewing
       };
     }
 
@@ -139,6 +141,7 @@ export class MurderBoardData {
       connections: currentBoard.connections || [],
       boardType: boardType,
       defaultConnectionColor: currentBoard.defaultConnectionColor || this.getDefaultConnectionColorForBoardType(boardType),
+      defaultConnectionSize: currentBoard.defaultConnectionSize || 5,
       canvasColor: currentBoard.canvasColor || this.getDefaultCanvasColorForBoardType(boardType),
       camera: currentBoard.camera || { x: 0, y: 0, zoom: 1 },
       backgroundImage: currentBoard.backgroundImage || null,
@@ -196,11 +199,11 @@ export class MurderBoardData {
 
   /**
    * Get all items for a scene
-   * @param {Scene} scene - The scene
+   * @param {Scene} scene - The scene (unused, kept for API compatibility)
    * @returns {Array} Array of item objects
    */
   static getItems(scene) {
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
     return boardData.items || [];
   }
 
@@ -212,7 +215,14 @@ export class MurderBoardData {
    */
   static getItem(scene, itemId) {
     const items = this.getItems(scene);
-    return items.find(item => item.id === itemId) || null;
+    const found = items.find(item => item.id === itemId) || null;
+    if (!found) {
+      console.warn(`Murder Board | Item not found: ${itemId}. Total items: ${items.length}`);
+      console.warn('Murder Board | Available item IDs:', items.map(i => i.id));
+    } else {
+      console.debug(`Murder Board | Found item ${itemId}:`, found);
+    }
+    return found;
   }
 
   /**
@@ -226,8 +236,11 @@ export class MurderBoardData {
       throw new Error('Invalid item data provided');
     }
 
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
     const items = boardData.items || [];
+    
+    // Calculate max z-index to ensure new items appear on top
+    const maxZIndex = items.reduce((max, item) => Math.max(max, item.zIndex || 0), 0);
     
     const newItem = {
       id: foundry.utils.randomID(),
@@ -237,6 +250,7 @@ export class MurderBoardData {
       y: itemData.y || 0,
       color: itemData.color || '#FFFFFF', // Default to white
       rotation: itemData.rotation || 0, // Rotation in degrees
+      zIndex: maxZIndex + 1, // Place on top of existing items
       data: itemData.data || {},
       acceptsConnections: itemData.acceptsConnections !== false, // Default to true
       createdAt: new Date().toISOString(),
@@ -246,7 +260,7 @@ export class MurderBoardData {
     boardData.items = updatedItems;
     
     // Save the updated board
-    await this.saveBoardData(scene, boardData);
+    await this.saveGlobalBoardData(boardData);
     
     return newItem;
   }
@@ -259,7 +273,7 @@ export class MurderBoardData {
    * @returns {Object|null} The updated item or null if not found
    */
   static async updateItem(scene, itemId, updates) {
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
     const items = boardData.items || [];
     const itemIndex = items.findIndex(item => item.id === itemId);
 
@@ -271,19 +285,30 @@ export class MurderBoardData {
     // Create a NEW array with the updated item
     const updatedItems = items.map((item, index) => {
       if (index === itemIndex) {
-        return {
+        // Deep merge the data object if it's being updated
+        const mergedItem = {
           ...item,
           ...updates,
           id: itemId, // Prevent ID changes
           createdAt: item.createdAt, // Preserve creation date
           updatedAt: new Date().toISOString(),
         };
+        
+        // If data is being updated, merge it with existing data instead of replacing
+        if (updates.data && item.data) {
+          mergedItem.data = {
+            ...item.data,
+            ...updates.data,
+          };
+        }
+        
+        return mergedItem;
       }
       return item;
     });
 
     boardData.items = updatedItems;
-    await this.saveBoardData(scene, boardData);
+    await this.saveGlobalBoardData(boardData);
     
     return updatedItems[itemIndex];
   }
@@ -295,8 +320,9 @@ export class MurderBoardData {
    * @returns {boolean} Whether deletion was successful
    */
   static async deleteItem(scene, itemId) {
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
     const items = boardData.items || [];
+    const itemToDelete = items.find(i => i.id === itemId);
     const filteredItems = items.filter(item => item.id !== itemId);
 
     if (filteredItems.length === items.length) return false; // Item not found
@@ -307,19 +333,238 @@ export class MurderBoardData {
       conn => conn.fromItem !== itemId && conn.toItem !== itemId
     );
 
+    // If item was part of a group, remove it from the group
+    if (itemToDelete && itemToDelete.groupId && boardData.groups) {
+      const group = boardData.groups.find(g => g.id === itemToDelete.groupId);
+      if (group) {
+        group.items = group.items.filter(id => id !== itemId);
+        // If group is now empty, remove the group entirely
+        if (group.items.length === 0) {
+          boardData.groups = boardData.groups.filter(g => g.id !== itemToDelete.groupId);
+        }
+      }
+    }
+
     boardData.items = filteredItems;
     boardData.connections = filteredConnections;
-    await this.saveBoardData(scene, boardData);
+    await this.saveGlobalBoardData(boardData);
     return true;
   }
 
   /**
+   * Bring an item to the front (highest z-index)
+   * @param {Scene} scene - The scene (unused, kept for API compatibility)
+   * @param {string} itemId - The item ID to bring to front
+   */
+  static async bringToFront(scene, itemId) {
+    try {
+      const boardData = this.getGlobalBoardData();
+      const items = boardData.items || [];
+      
+      const item = items.find(i => i.id === itemId);
+      if (!item) {
+        console.warn(`Murder Board | Item not found for bringToFront: ${itemId}`);
+        return false;
+      }
+      
+      // If item is in a group, move the group instead
+      if (item.groupId) {
+        return this.bringGroupToFront(item.groupId);
+      }
+      
+      // Find max z-index and set this item to max + 1
+      const maxZIndex = items.reduce((max, item) => Math.max(max, item.zIndex || 0), 0);
+      const newZIndex = maxZIndex + 1;
+      
+      const updatedItems = items.map(itm => {
+        if (itm.id === itemId) {
+          return { ...itm, zIndex: newZIndex };
+        }
+        return itm;
+      });
+
+      boardData.items = updatedItems;
+      await this.saveGlobalBoardData(boardData);
+      console.log(`Murder Board | Brought item ${itemId} to front: zIndex ${newZIndex}`);
+      return true;
+    } catch (error) {
+      console.error(`Murder Board | Error in bringToFront:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Bring an item forward one layer
+   * @param {Scene} scene - The scene (unused, kept for API compatibility)
+   * @param {string} itemId - The item ID to bring forward
+   * @returns {boolean} True if successful, false otherwise
+   */
+  static async bringForward(scene, itemId) {
+    try {
+      const boardData = this.getGlobalBoardData();
+      const items = boardData.items || [];
+      
+      const item = items.find(i => i.id === itemId);
+      if (!item) {
+        console.warn(`Murder Board | Item not found for bringForward: ${itemId}`);
+        return false;
+      }
+      
+      // If item is in a group, move the group instead
+      if (item.groupId) {
+        return this.bringGroupToFront(item.groupId);
+      }
+
+      const itemIndex = items.findIndex(item => item.id === itemId);
+      if (itemIndex === -1) return false;
+      
+      const currentItem = items[itemIndex];
+      const currentZIndex = currentItem.zIndex || 0;
+      
+      // Find the next higher z-index among other items
+      const higherZIndices = items
+        .filter((item, index) => index !== itemIndex && (item.zIndex || 0) > currentZIndex)
+        .map(item => item.zIndex || 0)
+        .sort((a, b) => a - b);
+      
+      let newZIndex;
+      if (higherZIndices.length > 0) {
+        // Move to just above the next item
+        newZIndex = higherZIndices[0] + 0.5;
+      } else {
+        // No items above, just increment by 1
+        const maxZIndex = items.reduce((max, item) => Math.max(max, item.zIndex || 0), 0);
+        newZIndex = maxZIndex + 1;
+      }
+      
+      const updatedItems = items.map(item => {
+        if (item.id === itemId) {
+          return { ...item, zIndex: newZIndex };
+        }
+        return item;
+      });
+
+      boardData.items = updatedItems;
+      await this.saveGlobalBoardData(boardData);
+      console.log(`Murder Board | Brought item ${itemId} forward: zIndex ${newZIndex}`);
+      return true;
+    } catch (error) {
+      console.error(`Murder Board | Error in bringForward:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Send an item to the back (lowest z-index)
+   * @param {Scene} scene - The scene (unused, kept for API compatibility)
+   * @param {string} itemId - The item ID to send to back
+   * @returns {boolean} True if successful, false otherwise
+   */
+  static async sendToBack(scene, itemId) {
+    try {
+      const boardData = this.getGlobalBoardData();
+      const items = boardData.items || [];
+      
+      const item = items.find(i => i.id === itemId);
+      if (!item) {
+        console.warn(`Murder Board | Item not found for sendToBack: ${itemId}`);
+        return false;
+      }
+      
+      // If item is in a group, move the group instead
+      if (item.groupId) {
+        return this.sendGroupToBack(item.groupId);
+      }
+      
+      // Find min z-index and set this item to min - 1
+      const minZIndex = items.reduce((min, item) => Math.min(min, item.zIndex || 0), 0);
+      const newZIndex = minZIndex - 1;
+      
+      const updatedItems = items.map(item => {
+        if (item.id === itemId) {
+          return { ...item, zIndex: newZIndex };
+        }
+        return item;
+      });
+
+      boardData.items = updatedItems;
+      await this.saveGlobalBoardData(boardData);
+      console.log(`Murder Board | Sent item ${itemId} to back: zIndex ${newZIndex}`);
+      return true;
+    } catch (error) {
+      console.error(`Murder Board | Error in sendToBack:`, error);
+      return false;
+    }
+  }
+
+  /**
+   * Send an item backward one layer
+   * @param {Scene} scene - The scene (unused, kept for API compatibility)
+   * @param {string} itemId - The item ID to send backward
+   * @returns {boolean} True if successful, false otherwise
+   */
+  static async sendBackward(scene, itemId) {
+    try {
+      const boardData = this.getGlobalBoardData();
+      const items = boardData.items || [];
+      
+      const item = items.find(i => i.id === itemId);
+      if (!item) {
+        console.warn(`Murder Board | Item not found for sendBackward: ${itemId}`);
+        return false;
+      }
+      
+      // If item is in a group, move the group instead
+      if (item.groupId) {
+        return this.sendGroupToBack(item.groupId);
+      }
+
+      const itemIndex = items.findIndex(item => item.id === itemId);
+      if (itemIndex === -1) return false;
+      
+      const currentItem = items[itemIndex];
+      const currentZIndex = currentItem.zIndex || 0;
+      
+      // Find the next lower z-index among other items
+      const lowerZIndices = items
+        .filter((item, index) => index !== itemIndex && (item.zIndex || 0) < currentZIndex)
+        .map(item => item.zIndex || 0)
+        .sort((a, b) => b - a);
+      
+      let newZIndex;
+      if (lowerZIndices.length > 0) {
+        // Move to just below the next item
+        newZIndex = lowerZIndices[0] - 0.5;
+      } else {
+        // No items below, just decrement by 1
+        const minZIndex = items.reduce((min, item) => Math.min(min, item.zIndex || 0), 0);
+        newZIndex = minZIndex - 1;
+      }
+      
+      const updatedItems = items.map(item => {
+        if (item.id === itemId) {
+          return { ...item, zIndex: newZIndex };
+        }
+        return item;
+      });
+
+      boardData.items = updatedItems;
+      await this.saveGlobalBoardData(boardData);
+      console.log(`Murder Board | Sent item ${itemId} backward: zIndex ${newZIndex}`);
+      return true;
+    } catch (error) {
+      console.error(`Murder Board | Error in sendBackward:`, error);
+      return false;
+    }
+  }
+
+  /**
    * Get all connections for a scene
-   * @param {Scene} scene - The scene
+   * @param {Scene} scene - The scene (unused, kept for API compatibility)
    * @returns {Array} Array of connection objects
    */
   static getConnections(scene) {
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
     return boardData.connections || [];
   }
 
@@ -339,7 +584,7 @@ export class MurderBoardData {
    * @param {Scene} scene - The scene
    * @param {string} fromItemId - Source item ID
    * @param {string} toItemId - Target item ID
-   * @param {Object} connectionData - Object with color, label
+   * @param {Object} connectionData - Object with color
    * @returns {Object} The created connection with generated ID
    */
   static async addConnection(scene, fromItemId, toItemId, connectionData = {}) {
@@ -364,23 +609,35 @@ export class MurderBoardData {
       throw new Error('Cannot create connection from item to itself');
     }
 
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
     const connections = boardData.connections || [];
-    // Use board's default connection color if not specified
+    
+    // Check for duplicate connections (both directions)
+    const duplicateExists = connections.some(conn => 
+      (conn.fromItem === fromItemId && conn.toItem === toItemId) ||
+      (conn.fromItem === toItemId && conn.toItem === fromItemId)
+    );
+    
+    if (duplicateExists) {
+      throw new Error('A connection already exists between these items');
+    }
+
+    // Use board's default connection color and size if not specified
     const defaultColor = boardData.defaultConnectionColor || this.getDefaultConnectionColorForBoardType(boardData.boardType);
+    const defaultSize = boardData.defaultConnectionSize || 5;
     const newConnection = {
       id: foundry.utils.randomID(),
       fromItem: fromItemId,
       toItem: toItemId,
       color: connectionData.color || defaultColor,
-      label: connectionData.label || '',
-      width: connectionData.width || 8, // Medium width by default
+
+      width: connectionData.width || defaultSize,
       createdAt: new Date().toISOString(),
     };
 
     const updatedConnections = [...connections, newConnection];
     boardData.connections = updatedConnections;
-    await this.saveBoardData(scene, boardData);
+    await this.saveGlobalBoardData(boardData);
     return newConnection;
   }
 
@@ -392,7 +649,7 @@ export class MurderBoardData {
    * @returns {Object|null} The updated connection or null if not found
    */
   static async updateConnection(scene, connectionId, updates) {
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
     const connections = boardData.connections || [];
     const connIndex = connections.findIndex(conn => conn.id === connectionId);
 
@@ -414,7 +671,7 @@ export class MurderBoardData {
     });
 
     boardData.connections = updatedConnections;
-    await this.saveBoardData(scene, boardData);
+    await this.saveGlobalBoardData(boardData);
     return updatedConnections[connIndex];
   }
 
@@ -425,14 +682,14 @@ export class MurderBoardData {
    * @returns {boolean} Whether deletion was successful
    */
   static async deleteConnection(scene, connectionId) {
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
     const connections = boardData.connections || [];
     const filteredConnections = connections.filter(conn => conn.id !== connectionId);
 
     if (filteredConnections.length === connections.length) return false; // Connection not found
 
     boardData.connections = filteredConnections;
-    await this.saveBoardData(scene, boardData);
+    await this.saveGlobalBoardData(boardData);
     return true;
   }
 
@@ -468,13 +725,14 @@ export class MurderBoardData {
 
   /**
    * Clear all board data from a scene
-   * @param {Scene} scene - The scene
+   * @param {Scene} scene - The scene (unused, kept for API compatibility)
    */
   static async clearBoard(scene) {
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
     boardData.items = [];
     boardData.connections = [];
-    await this.saveBoardData(scene, boardData);
+    boardData.groups = [];
+    await this.saveGlobalBoardData(boardData);
   }
 
   /**
@@ -483,25 +741,33 @@ export class MurderBoardData {
    * @param {Object} updates - Object with boardType, etc.
    */
   static async updateBoardData(scene, updates) {
-    const flags = scene.flags['murder-board'] || {};
+    const boardData = this.getGlobalBoardData();
     
     if (updates.boardType !== undefined) {
-      await this._setFlag(scene, 'boardType', updates.boardType);
+      boardData.boardType = updates.boardType;
     }
+    
+    await this.saveGlobalBoardData(boardData);
   }
 
   /**
    * Export board data as JSON
-   * @param {Scene} scene - The scene
+   * @param {Scene} scene - The scene (unused, kept for API compatibility)
    * @returns {Object} Board data object
    */
   static exportBoard(scene) {
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
+    const moduleVersion = game.modules.get('murder-board')?.version || '1.1.1';
     return {
-      version: '1.0.0',
+      version: moduleVersion,
+      name: boardData.name,
       boardType: boardData.boardType,
       items: boardData.items,
       connections: boardData.connections,
+      canvasColor: boardData.canvasColor,
+      backgroundImage: boardData.backgroundImage,
+      backgroundScale: boardData.backgroundScale,
+      defaultConnectionColor: boardData.defaultConnectionColor,
       exportedAt: new Date().toISOString(),
     };
   }
@@ -518,9 +784,48 @@ export class MurderBoardData {
         throw new Error('Invalid board data structure');
       }
 
-      await this._setFlag(scene, 'boardType', data.boardType || 'whiteboard');
-      await this._setFlag(scene, 'items', data.items);
-      await this._setFlag(scene, 'connections', data.connections);
+      // Get all global boards
+      let boards = this.getGlobalBoards();
+
+      // Find the current board or use the first one
+      let currentBoardId = this.getGlobalCurrentBoardId();
+      let currentBoard = boards.find(b => b.id === currentBoardId);
+      if (!currentBoard && boards.length > 0) {
+        currentBoard = boards[0];
+        currentBoardId = currentBoard.id;
+      } else if (!currentBoard) {
+        // Create a default board if none exist
+        currentBoardId = foundry.utils.randomID();
+        currentBoard = {
+          id: currentBoardId,
+          name: data.name || 'Imported Board',
+          items: [],
+          connections: [],
+          boardType: 'whiteboard',
+          defaultConnectionColor: '#000000',
+        };
+        boards.push(currentBoard);
+      }
+
+      // Update the current board with imported data
+      currentBoard.items = data.items;
+      currentBoard.connections = data.connections;
+      currentBoard.boardType = data.boardType || 'whiteboard';
+      
+      // Import optional board settings
+      if (data.name) currentBoard.name = data.name;
+      if (data.canvasColor) currentBoard.canvasColor = data.canvasColor;
+      if (data.backgroundImage) currentBoard.backgroundImage = data.backgroundImage;
+      if (data.backgroundScale !== undefined) currentBoard.backgroundScale = data.backgroundScale;
+      if (data.defaultConnectionColor) currentBoard.defaultConnectionColor = data.defaultConnectionColor;
+
+      console.log('Murder Board | Importing board', currentBoardId, 'with', data.items.length, 'items and background image:', data.backgroundImage);
+
+      // Save all boards globally
+      await this.saveGlobalBoards(boards);
+      await this.setGlobalCurrentBoardId(currentBoardId);
+
+      console.log('Murder Board | Import complete, global boards saved');
       return true;
     } catch (error) {
       console.error('Murder Board | Import failed:', error);
@@ -573,8 +878,9 @@ export class MurderBoardData {
     // GMs always can edit
     if (game.user.isGM) return true;
     
-    const flags = scene.flags['murder-board'] || {};
-    const permissions = flags.permissions || { allowPlayersToEdit: true, restrictedPlayers: [] };
+    // Get permissions from current global board
+    const boardData = this.getGlobalBoardData();
+    const permissions = boardData.permissions || { allowPlayersToEdit: true, restrictedPlayers: [] };
     
     // Check if player is in restricted list
     if (permissions.restrictedPlayers?.includes(game.user.id)) {
@@ -586,13 +892,63 @@ export class MurderBoardData {
   }
 
   /**
+   * Check if current user can view the board
+   * @param {Scene} scene - The scene
+   * @returns {boolean} True if user can view
+   */
+  static canUserView(scene) {
+    // GMs always can view
+    if (game.user.isGM) return true;
+    
+    // Get permissions from current global board
+    const boardData = this.getGlobalBoardData();
+    const permissions = boardData.permissions || { allowPlayersToView: true, restrictedViewers: [] };
+    
+    // Check if player is in restricted viewers list
+    if (permissions.restrictedViewers?.includes(game.user.id)) {
+      return false;
+    }
+    
+    // Check if viewing is allowed for players
+    return permissions.allowPlayersToView !== false;
+  }
+
+  /**
+   * Check if current user can view a specific board by ID
+   * @param {string} boardId - The board ID
+   * @returns {boolean} True if user can view
+   */
+  static canUserViewBoard(boardId) {
+    // GMs always can view
+    if (game.user.isGM) return true;
+    
+    // Get the board from global boards
+    const boards = this.getGlobalBoards();
+    const board = boards.find(b => b.id === boardId);
+    
+    if (!board) return false;
+    
+    // Get permissions from the board
+    const permissions = board.permissions || { allowPlayersToView: true, restrictedViewers: [] };
+    
+    // Check if player is in restricted viewers list
+    if (permissions.restrictedViewers?.includes(game.user.id)) {
+      return false;
+    }
+    
+    // Check if viewing is allowed for players
+    return permissions.allowPlayersToView !== false;
+  }
+
+  /**
    * Get permissions for the board
    * @param {Scene} scene - The scene
    * @returns {Object} Permissions object
    */
   static getPermissions(scene) {
-    const flags = scene.flags['murder-board'] || {};
-    return flags.permissions || { allowPlayersToEdit: true, restrictedPlayers: [] };
+    // Get permissions from current global board
+    const boardData = this.getGlobalBoardData();
+    return boardData.permissions || { allowPlayersToEdit: true, restrictedPlayers: [], allowPlayersToView: true, restrictedViewers: [] };
   }
 
   /**
@@ -671,17 +1027,499 @@ export class MurderBoardData {
    * @param {Object} permissions - New permissions object
    */
   static async updatePermissions(scene, permissions) {
-    await this._setFlag(scene, 'permissions', permissions);
+    // Update permissions on the current global board
+    const boardData = this.getGlobalBoardData();
+    boardData.permissions = permissions;
+    await this.saveGlobalBoardData(boardData);
   }
 
   /**
    * Update the default connection color for the current board
-   * @param {Scene} scene - The scene
+   * @param {Scene} scene - The scene (unused, kept for API compatibility)
    * @param {string} color - The new default connection color (hex code)
    */
   static async updateBoardDefaultConnectionColor(scene, color) {
-    const boardData = this.getBoardData(scene);
+    const boardData = this.getGlobalBoardData();
     boardData.defaultConnectionColor = color;
-    await this.saveBoardData(scene, boardData);
+    await this.saveGlobalBoardData(boardData);
+  }
+
+  /**
+   * Get all boards (global, not scene-specific)
+   * @returns {Array} Array of all board objects
+   */
+  static getGlobalBoards() {
+    return game.settings.get('murder-board', 'globalBoards') || [];
+  }
+
+  /**
+   * Get the current board ID (globally)
+   * @returns {string} The current board ID
+   */
+  static getGlobalCurrentBoardId() {
+    return game.settings.get('murder-board', 'globalCurrentBoardId') || null;
+  }
+
+  /**
+   * Set the current board ID globally
+   * @param {string} boardId - The board ID to set as current
+   */
+  static async setGlobalCurrentBoardId(boardId) {
+    // Client scope - each user sets their own current board
+    await game.settings.set('murder-board', 'globalCurrentBoardId', boardId);
+  }
+
+  /**
+   * Save all boards globally
+   * @param {Array} boards - Array of board objects
+   */
+  static async saveGlobalBoards(boards) {
+    if (game.user.isGM) {
+      await game.settings.set('murder-board', 'globalBoards', boards);
+    } else {
+      // Only emit socket if not currently receiving an update (prevent echo)
+      if (!window.game.murderBoard?._isReceivingSocketUpdate) {
+        const { emitSocketMessage } = await import('./socket-handler.js');
+        emitSocketMessage('setGlobalBoards', { boards });
+      }
+    }
+  }
+
+  /**
+   * Get the current board data (uses global boards)
+   * @returns {Object} Current board data
+   */
+  /**
+   * Ensure all connections have label properties and migrate old labels to Text items
+   * This is a migration helper for converting old embedded connection.label to separate Text items
+   * Preserves old label data with _wasMigrated flag for backup/recovery purposes
+   * @param {Array} connections - Array of connections to check
+   * @param {Array} items - Array of items (for creating new label items)
+   * @returns {Object} Object with { connections, newItems } where newItems are created Text items
+   * @private
+   */
+  static _ensureConnectionsHaveLabels(connections, items = []) {
+    if (!connections || connections.length === 0) {
+      return { connections, newItems: [] };
+    }
+    
+    const newItems = [];
+    
+    // Migrate connections, adding label properties and converting old labels
+    const migratedConnections = connections.map(connection => {
+      // Check if this connection has old-style label data that needs conversion
+      if (connection.label && !connection.labelItemId && !connection._wasMigrated) {
+        // Old format: connection.label
+        // Convert to new format: create a Text item and reference it
+        
+        // Calculate midpoint between connected items (best guess for label position)
+        const fromItem = items.find(i => i.id === connection.fromItem);
+        const toItem = items.find(i => i.id === connection.toItem);
+        
+        let labelX = 0;
+        let labelY = 0;
+        
+        if (fromItem && toItem) {
+          const centerFrom = {
+            x: fromItem.x + (fromItem.data?.width || 40) / 2,
+            y: fromItem.y + (fromItem.data?.height || 40) / 2
+          };
+          const centerTo = {
+            x: toItem.x + (toItem.data?.width || 40) / 2,
+            y: toItem.y + (toItem.data?.height || 40) / 2
+          };
+          labelX = (centerFrom.x + centerTo.x) / 2 - 60; // Center the text (approximate width)
+          labelY = (centerFrom.y + centerTo.y) / 2 - 25; // Center the text (approximate height)
+        }
+        
+        const labelItem = {
+          id: foundry.utils.randomID(),
+          type: 'Text',
+          label: 'Connection Label',
+          x: labelX,
+          y: labelY,
+          color: '#000000',
+          data: {
+            text: connection.label,
+            font: 'Arial',
+            textColor: '#000000',
+            fontSize: 14,
+            width: 120,
+            height: 50,
+          },
+        };
+        newItems.push(labelItem);
+        
+        // Update connection to reference the new Text item, but preserve old label data
+        return {
+          ...connection,
+          labelItemId: labelItem.id,
+          labelOffsetX: 0,
+          labelOffsetY: 0,
+          _wasMigrated: true, // Mark as migrated for recovery/backup purposes
+        };
+      }
+      
+      // Ensure new label properties exist
+      return {
+        ...connection,
+        labelItemId: connection.labelItemId || null,
+        labelOffsetX: connection.labelOffsetX || 0,
+        labelOffsetY: connection.labelOffsetY || 0,
+      };
+    });
+    
+    return { connections: migratedConnections, newItems };
+  }
+
+  /**
+   * Ensure all items have a zIndex property for layering
+   * This is a migration helper for items created before zIndex was added
+   * @param {Array} items - Array of items to check
+   * @returns {Array} Items with zIndex ensured
+   * @private
+   */
+  static _ensureItemsHaveZIndex(items) {
+    if (!items || items.length === 0) return items;
+    
+    // Check if any items are missing zIndex
+    const needsMigration = items.some(item => typeof item.zIndex === 'undefined');
+    
+    if (!needsMigration) {
+      return items;
+    }
+    
+    // Migrate items, assigning zIndex based on creation order or a default value
+    return items.map((item, index) => {
+      if (typeof item.zIndex === 'undefined') {
+        return {
+          ...item,
+          zIndex: index, // Assign based on position in array
+        };
+      }
+      return item;
+    });
+  }
+
+  static getGlobalBoardData() {
+    const boards = this.getGlobalBoards();
+    const currentBoardId = this.getGlobalCurrentBoardId();
+
+    let currentBoard = boards.find(b => b.id === currentBoardId);
+    if (!currentBoard && boards.length > 0) {
+      currentBoard = boards[0];
+    } else if (!currentBoard) {
+      // Create a default board if none exist
+      const boardId = foundry.utils.randomID();
+      currentBoard = {
+        id: boardId,
+        name: 'Default Board',
+        items: [],
+        connections: [],
+        groups: [],
+        boardType: 'whiteboard',
+        defaultConnectionColor: '#000000',
+        defaultConnectionSize: 5,
+        canvasColor: '#f5f5f5',
+        defaultFont: 'Arial',
+        defaultFontColor: '#000000',
+        camera: { x: 0, y: 0, zoom: 1 },
+      };
+      boards.push(currentBoard);
+      // Save the new default board
+      this.saveGlobalBoards(boards);
+      this.setGlobalCurrentBoardId(boardId);
+    }
+
+    const boardType = currentBoard.boardType || 'whiteboard';
+    
+    // Ensure all items have zIndex (migration for old data)
+    const items = this._ensureItemsHaveZIndex(currentBoard.items || []);
+    
+    // Ensure all connections have label properties (but don't create items - that's handled by migration)
+    const connections = (currentBoard.connections || []).map(connection => {
+      return {
+        ...connection,
+        labelItemId: connection.labelItemId || null,
+        labelOffsetX: connection.labelOffsetX || 0,
+        labelOffsetY: connection.labelOffsetY || 0,
+      };
+    });
+    
+    return {
+      id: currentBoard.id,
+      name: currentBoard.name || 'Untitled Board',
+      items: items,
+      connections: connections,
+      groups: currentBoard.groups || [],
+      boardType: boardType,
+      defaultConnectionColor: currentBoard.defaultConnectionColor || this.getDefaultConnectionColorForBoardType(boardType),
+      defaultConnectionSize: currentBoard.defaultConnectionSize || 5,
+      canvasColor: currentBoard.canvasColor || this.getDefaultCanvasColorForBoardType(boardType),
+      defaultFont: currentBoard.defaultFont || 'Arial',
+      defaultFontColor: currentBoard.defaultFontColor || '#000000',
+      camera: currentBoard.camera || { x: 0, y: 0, zoom: 1 },
+      backgroundImage: currentBoard.backgroundImage || null,
+      backgroundScale: currentBoard.backgroundScale || 1.0,
+      permissions: currentBoard.permissions || { allowPlayersToEdit: true, restrictedPlayers: [], allowPlayersToView: true, restrictedViewers: [] },
+    };
+  }
+
+  /**
+   * Save board data globally
+   * @param {Object} boardData - The board data to save
+   */
+  static async saveGlobalBoardData(boardData) {
+    const boards = this.getGlobalBoards();
+    const index = boards.findIndex(b => b.id === boardData.id);
+
+    if (index !== -1) {
+      // Create a new board object with spread data AND deep copy of items array to ensure Foundry detects the change
+      boards[index] = {
+        ...boards[index],
+        ...boardData,
+        items: boardData.items ? [...boardData.items] : boards[index].items  // Create new array reference
+      };
+    } else {
+      boards.push(boardData);
+    }
+
+    await this.saveGlobalBoards(boards);
+  }
+
+  /**
+   * Create a new board globally
+   * @param {Object} boardData - The board data
+   */
+  static async createGlobalBoard(boardData) {
+    const boards = this.getGlobalBoards();
+    const newBoard = {
+      id: boardData.id || foundry.utils.randomID(),
+      name: boardData.name || 'New Board',
+      items: boardData.items || [],
+      connections: boardData.connections || [],
+      groups: boardData.groups || [],
+      boardType: boardData.boardType || 'whiteboard',
+      defaultConnectionColor: boardData.defaultConnectionColor || this.getDefaultConnectionColorForBoardType(boardData.boardType || 'whiteboard'),
+      canvasColor: boardData.canvasColor || this.getDefaultCanvasColorForBoardType(boardData.boardType || 'whiteboard'),
+      defaultFont: boardData.defaultFont || 'Arial',
+      defaultFontColor: boardData.defaultFontColor || '#000000',
+      camera: boardData.camera || { x: 0, y: 0, zoom: 1 },
+      backgroundImage: boardData.backgroundImage,
+      backgroundScale: boardData.backgroundScale,
+      backgroundMode: boardData.backgroundMode,
+      permissions: boardData.permissions,
+    };
+    boards.push(newBoard);
+    await this.saveGlobalBoards(boards);
+    return newBoard;
+  }
+
+  /**
+   * Delete a board globally
+   * @param {string} boardId - The ID of the board to delete
+   */
+  static async deleteGlobalBoard(boardId) {
+    const boards = this.getGlobalBoards();
+    const filtered = boards.filter(b => b.id !== boardId);
+    await this.saveGlobalBoards(filtered);
+
+    // If deleted board was current, switch to first remaining board
+    if (this.getGlobalCurrentBoardId() === boardId) {
+      if (filtered.length > 0) {
+        await this.setGlobalCurrentBoardId(filtered[0].id);
+      }
+    }
+    
+    return true;
+  }
+
+  /**
+   * Create a group from selected item IDs
+   * @param {Array<string>} itemIds - Array of item IDs to group
+   * @returns {string} The new group ID
+   */
+  static async createGroup(itemIds) {
+    if (itemIds.length < 2) {
+      throw new Error('Groups must contain at least 2 items');
+    }
+
+    const boardData = this.getGlobalBoardData();
+    if (!boardData.groups) boardData.groups = [];
+    if (!boardData.items) boardData.items = [];
+
+    // Check if any items are already in a group
+    const itemsToGroup = boardData.items.filter(item => itemIds.includes(item.id));
+    const itemsInExistingGroup = itemsToGroup.find(item => item.groupId);
+    if (itemsInExistingGroup) {
+      throw new Error(`Cannot create group: "${itemsInExistingGroup.label || itemsInExistingGroup.id}" is already part of another group`);
+    }
+
+    // Find the highest z-index among items to be grouped
+    const groupedItems = boardData.items.filter(item => itemIds.includes(item.id));
+    const maxZIndex = Math.max(...groupedItems.map(item => item.zIndex || 0), 0);
+
+    // Create group object
+    const groupId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const group = {
+      id: groupId,
+      zIndex: maxZIndex, // Group z-index is set to highest member z-index
+      items: itemIds,
+      name: `Group ${groupId.substring(6, 16)}`,
+      createdAt: Date.now(),
+    };
+
+    // Assign groupId to all items
+    const updatedItems = boardData.items.map(item => {
+      if (itemIds.includes(item.id)) {
+        return { ...item, groupId };
+      }
+      return item;
+    });
+
+    boardData.groups.push(group);
+    boardData.items = updatedItems;
+
+    await this.saveGlobalBoardData(boardData);
+    return groupId;
+  }
+
+  /**
+   * Ungroup items - removes group and returns items to individual z-index
+   * @param {string} groupId - The group ID to ungroup
+   */
+  static async ungroup(groupId) {
+    const boardData = this.getGlobalBoardData();
+    if (!boardData.groups) boardData.groups = [];
+    if (!boardData.items) boardData.items = [];
+
+    const groupIndex = boardData.groups.findIndex(g => g.id === groupId);
+    if (groupIndex === -1) {
+      console.warn(`Murder Board | Group not found: ${groupId}`);
+      return false;
+    }
+
+    const group = boardData.groups[groupIndex];
+    
+    // Remove groupId from all items in the group
+    const updatedItems = boardData.items.map(item => {
+      if (item.groupId === groupId) {
+        // Create new item object without groupId
+        const newItem = { ...item };
+        delete newItem.groupId;
+        return newItem;
+      }
+      return item;
+    });
+
+    boardData.groups.splice(groupIndex, 1);
+    boardData.items = updatedItems;
+
+    await this.saveGlobalBoardData(boardData);
+    return true;
+  }
+
+  /**
+   * Get all items in a group
+   * @param {string} groupId - The group ID
+   * @returns {Array<Object>} Array of items in the group
+   */
+  static getGroupItems(groupId) {
+    const boardData = this.getGlobalBoardData();
+    return (boardData.items || []).filter(item => item.groupId === groupId);
+  }
+
+  /**
+   * Get group by ID
+   * @param {string} groupId - The group ID
+   * @returns {Object|null} The group object or null
+   */
+  static getGroup(groupId) {
+    const boardData = this.getGlobalBoardData();
+    return (boardData.groups || []).find(g => g.id === groupId) || null;
+  }
+
+  /**
+   * Bring group to front (set group z-index higher than all others)
+   * @param {string} groupId - The group ID
+   */
+  static async bringGroupToFront(groupId) {
+    const boardData = this.getGlobalBoardData();
+    const groups = boardData.groups || [];
+    const items = boardData.items || [];
+
+    const group = groups.find(g => g.id === groupId);
+    if (!group) return;
+
+    // Find the highest z-index among all other groups
+    const otherGroupZIndices = groups
+      .filter(g => g.id !== groupId)
+      .map(g => g.zIndex || 0);
+
+    const maxZIndex = Math.max(...otherGroupZIndices, 0);
+    const newZIndex = maxZIndex + 1;
+
+    // Update group z-index
+    group.zIndex = newZIndex;
+
+    // Update all items in the group to maintain relative order
+    const groupItemIds = items
+      .filter(item => item.groupId === groupId)
+      .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
+      .map(item => item.id);
+
+    const updatedItems = items.map(item => {
+      if (item.groupId === groupId) {
+        // Preserve relative position within group, add offset from new group z-index
+        const relativeIndex = groupItemIds.indexOf(item.id);
+        return { ...item, zIndex: newZIndex + (relativeIndex * 0.1) };
+      }
+      return item;
+    });
+
+    boardData.items = updatedItems;
+    await this.saveGlobalBoardData(boardData);
+  }
+
+  /**
+   * Send group to back (set group z-index lower than all others)
+   * @param {string} groupId - The group ID
+   */
+  static async sendGroupToBack(groupId) {
+    const boardData = this.getGlobalBoardData();
+    const groups = boardData.groups || [];
+    const items = boardData.items || [];
+
+    const group = groups.find(g => g.id === groupId);
+    if (!group) return;
+
+    // Find the lowest z-index among all other groups
+    const otherGroupZIndices = groups
+      .filter(g => g.id !== groupId)
+      .map(g => g.zIndex || 0);
+
+    const minZIndex = Math.min(...otherGroupZIndices, 0);
+    const newZIndex = minZIndex - 1;
+
+    // Update group z-index
+    group.zIndex = newZIndex;
+
+    // Update all items in the group to maintain relative order
+    const groupItemIds = items
+      .filter(item => item.groupId === groupId)
+      .sort((a, b) => (a.zIndex || 0) - (b.zIndex || 0))
+      .map(item => item.id);
+
+    const updatedItems = items.map(item => {
+      if (item.groupId === groupId) {
+        // Preserve relative position within group, add offset from new group z-index
+        const relativeIndex = groupItemIds.indexOf(item.id);
+        return { ...item, zIndex: newZIndex + (relativeIndex * 0.1) };
+      }
+      return item;
+    });
+
+    boardData.items = updatedItems;
+    await this.saveGlobalBoardData(boardData);
   }
 }

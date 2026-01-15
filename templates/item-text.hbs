@@ -1,7 +1,7 @@
 <form class="murder-board-item-form">
-  <div class="form-group">
+  <div class="murder-board-form-group">
     <label for="text-label">Text Content</label>
-    <textarea id="text-label" name="label" placeholder="Enter text..." autofocus class="form-textarea">{{#if label}}{{label}}{{/if}}</textarea>
+    <textarea id="text-label" name="label" placeholder="Enter text..." autofocus class="murder-board-textarea">{{#if label}}{{label}}{{/if}}</textarea>
   </div>
 
   {{> color-picker 
@@ -18,13 +18,13 @@
     label="Font Family"
   }}
 
-  <div class="form-group">
+  <div class="murder-board-form-group">
     <label for="text-size">Font Size</label>
-    <input type="number" id="text-size" name="fontSize" value="{{data.fontSize}}" min="8" max="72" step="1" class="form-input">
+    <input type="number" id="text-size" name="fontSize" value="{{data.fontSize}}" min="8" max="72" step="1" class="murder-board-input">
   </div>
 
-  <div class="form-group">
-    <label class="checkbox-label">
+  <div class="murder-board-form-group">
+    <label class="murder-board-checkbox-label">
       <input type="checkbox" name="acceptsConnections" value="on" {{#if acceptsConnections}}checked{{/if}}>
       <span>Accepts Connections</span>
     </label>

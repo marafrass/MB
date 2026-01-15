@@ -1,19 +1,11 @@
 <form class="murder-board-item-form">
-  <div class="form-group">
+  <div class="murder-board-form-group">
     <label>Select Image</label>
-    <div class="file-input-wrapper" style="display: flex; flex-direction: column; gap: 8px;">
+    <div class="murder-board-file-input-wrapper">
       {{#file-picker type="image" buttonClass="murder-board-btn"}}{{/file-picker}}
-      <input type="text" name="imageUrl" value="{{data.imageUrl}}" placeholder="Path to image..." style="width: 100%;">
+      <input type="text" name="imageUrl" value="{{data.imageUrl}}" placeholder="Path to image..." class="murder-board-input">
     </div>
   </div>
-
-  {{> radio-group 
-    name="preset"
-    options=imageSizeOptions
-    currentValue=data.preset
-    variant="icons"
-    label="Image Size"
-  }}
 
   {{> radio-group 
     name="borderColor"
@@ -31,8 +23,8 @@
     label="Fastener Type"
   }}
 
-  <div class="form-group">
-    <label class="checkbox-label">
+  <div class="murder-board-form-group">
+    <label class="murder-board-checkbox-label">
       <input type="checkbox" name="acceptsConnections" value="on" {{#if acceptsConnections}}checked{{/if}}>
       <span>Accepts Connections</span>
     </label>

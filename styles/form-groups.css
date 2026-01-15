@@ -1,26 +1,29 @@
 /**
  * Murder Board - Form Groups & Input Styling
  * Standardized form elements with consistent spacing and behavior
- * ALL SELECTORS SCOPED TO .murder-board NAMESPACE
+ * ALL SELECTORS SCOPED TO .murder-board OR .murder-board-* NAMESPACE
  */
 
-/* ===== Generic Form Group Container ===== */
+/* ===== Form Group Container ===== */
 
-.murder-board .form-group {
+.murder-board .form-group,
+.murder-board-form-group {
   margin-bottom: var(--mb-spacing-3xl);
   display: flex;
   flex-direction: column;
   gap: var(--mb-spacing-sm);
 }
 
-.murder-board .form-group:last-child {
+.murder-board .form-group:last-child,
+.murder-board-form-group:last-child {
   margin-bottom: 0;
 }
 
 /* ===== Form Labels ===== */
 
 .murder-board .form-label,
-.murder-board .form-group label {
+.murder-board .form-group label,
+.murder-board-form-group label {
   display: block;
   margin-bottom: var(--mb-spacing-xs);
   font-weight: 700;
@@ -32,7 +35,8 @@
 }
 
 .murder-board .form-label.optional,
-.murder-board .form-group label.optional {
+.murder-board .form-group label.optional,
+.murder-board-form-group label.optional {
   font-weight: 500;
   text-transform: none;
   letter-spacing: normal;
@@ -42,12 +46,20 @@
 /* ===== Text Inputs & Textareas ===== */
 
 .murder-board .form-input,
+.murder-board-input,
 .murder-board .form-group input[type="text"],
 .murder-board .form-group input[type="email"],
 .murder-board .form-group input[type="url"],
 .murder-board .form-group input[type="number"],
+.murder-board-form-group input[type="text"],
+.murder-board-form-group input[type="email"],
+.murder-board-form-group input[type="url"],
+.murder-board-form-group input[type="number"],
 .murder-board .form-group textarea,
-.murder-board .form-group select {
+.murder-board-textarea,
+.murder-board-form-group textarea,
+.murder-board .form-group select,
+.murder-board-form-group select {
   width: 100%;
   padding: var(--mb-spacing-md) var(--mb-spacing-lg);
   border: 2px solid var(--mb-dialog-input-border);
@@ -62,12 +74,20 @@
 }
 
 .murder-board .form-input:focus,
+.murder-board-input:focus,
 .murder-board .form-group input[type="text"]:focus,
 .murder-board .form-group input[type="email"]:focus,
 .murder-board .form-group input[type="url"]:focus,
 .murder-board .form-group input[type="number"]:focus,
+.murder-board-form-group input[type="text"]:focus,
+.murder-board-form-group input[type="email"]:focus,
+.murder-board-form-group input[type="url"]:focus,
+.murder-board-form-group input[type="number"]:focus,
 .murder-board .form-group textarea:focus,
-.murder-board .form-group select:focus {
+.murder-board-textarea:focus,
+.murder-board-form-group textarea:focus,
+.murder-board .form-group select:focus,
+.murder-board-form-group select:focus {
   outline: none;
   border-color: var(--mb-secondary);
   box-shadow: var(--mb-shadow-focus);
@@ -75,16 +95,23 @@
 }
 
 .murder-board .form-input:disabled,
+.murder-board-input:disabled,
 .murder-board .form-group input:disabled,
+.murder-board-form-group input:disabled,
 .murder-board .form-group textarea:disabled,
-.murder-board .form-group select:disabled {
+.murder-board-textarea:disabled,
+.murder-board-form-group textarea:disabled,
+.murder-board .form-group select:disabled,
+.murder-board-form-group select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
   background-color: rgba(0, 0, 0, 0.05);
 }
 
 /* Textarea specific adjustments */
-.murder-board .form-group textarea {
+.murder-board .form-group textarea,
+.murder-board-textarea,
+.murder-board-form-group textarea {
   resize: vertical;
   min-height: 120px;
   font-family: 'Courier New', monospace;
@@ -169,7 +196,10 @@ html.dark-mode .murder-board .form-help {
 }
 
 .murder-board .checkbox-label,
-.murder-board .form-group .checkbox-label {
+.murder-board-checkbox-label,
+.murder-board .form-group .checkbox-label,
+.murder-board-form-group .checkbox-label,
+.murder-board-form-group .murder-board-checkbox-label {
   display: flex;
   align-items: center;
   gap: var(--mb-spacing-md);
@@ -179,10 +209,14 @@ html.dark-mode .murder-board .form-help {
   letter-spacing: normal;
   cursor: pointer;
   user-select: none;
+  margin: 0;
 }
 
 .murder-board .checkbox-label input[type="checkbox"],
-.murder-board .form-group .checkbox-label input[type="checkbox"] {
+.murder-board-checkbox-label input[type="checkbox"],
+.murder-board .form-group .checkbox-label input[type="checkbox"],
+.murder-board-form-group .checkbox-label input[type="checkbox"],
+.murder-board-form-group .murder-board-checkbox-label input[type="checkbox"] {
   width: 20px;
   height: 20px;
   cursor: pointer;
@@ -192,7 +226,10 @@ html.dark-mode .murder-board .form-help {
 }
 
 .murder-board .checkbox-label input[type="checkbox"]:focus,
-.murder-board .form-group .checkbox-label input[type="checkbox"]:focus {
+.murder-board-checkbox-label input[type="checkbox"]:focus,
+.murder-board .form-group .checkbox-label input[type="checkbox"]:focus,
+.murder-board-form-group .checkbox-label input[type="checkbox"]:focus,
+.murder-board-form-group .murder-board-checkbox-label input[type="checkbox"]:focus {
   outline: 2px solid var(--mb-secondary);
   outline-offset: 2px;
 }
@@ -262,18 +299,21 @@ html.dark-mode .murder-board .form-help {
 
 /* ===== File Input Wrapper ===== */
 
-.murder-board .file-input-wrapper {
+.murder-board .file-input-wrapper,
+.murder-board-file-input-wrapper {
   position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--mb-spacing-sm);
 }
 
-.murder-board .file-input-wrapper input[type="text"] {
+.murder-board .file-input-wrapper input[type="text"],
+.murder-board-file-input-wrapper input[type="text"] {
   width: 100%;
 }
 
-.murder-board .file-input-wrapper button {
+.murder-board .file-input-wrapper button,
+.murder-board-file-input-wrapper button {
   text-align: center;
   padding: var(--mb-spacing-md) var(--mb-spacing-lg);
   font-size: var(--mb-font-base);
@@ -290,6 +330,28 @@ html.dark-mode .murder-board .form-help {
 
 .murder-board .font-select-wrapper select {
   flex: 1;
+  padding: var(--mb-spacing-md) var(--mb-spacing-lg);
+  border: 2px solid var(--mb-dialog-input-border);
+  border-radius: var(--mb-radius-sm);
+  font-size: 14px;
+  box-sizing: border-box;
+  font-family: inherit;
+  transition: var(--mb-transition-all-normal);
+  line-height: 1.5;
+  cursor: pointer;
+  color: #000000 !important;
+  background-color: #ffffff !important;
+}
+
+.murder-board .font-select-wrapper select:hover {
+  border-color: var(--mb-secondary);
+}
+
+.murder-board .font-select-wrapper select:focus {
+  outline: none;
+  border-color: var(--mb-secondary);
+  box-shadow: var(--mb-shadow-focus);
+  transform: translateY(-2px);
 }
 
 .murder-board .font-display {
@@ -323,3 +385,47 @@ html.dark-mode .murder-board .form-help {
 .murder-board .form-row-half .form-group {
   flex: 0 1 calc(50% - var(--mb-spacing-md)/2);
 }
+
+/* ===== Context Menu Font Select Dropdown ===== */
+
+.murder-board-font-select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%23333' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  background-color: var(--mb-dialog-input-bg);
+  padding: 6px 28px 6px 8px;
+  color: var(--mb-text);
+  border: 1px solid var(--mb-dialog-input-border);
+  border-radius: 3px;
+  line-height: 1.4;
+  height: auto;
+  min-height: 28px;
+  box-sizing: border-box;
+}
+
+.murder-board-font-select:focus {
+  outline: none;
+  border-color: var(--mb-secondary);
+  box-shadow: 0 0 0 3px var(--mb-focus-shadow);
+}
+
+.murder-board-font-select option {
+  background-color: var(--mb-dialog-input-bg);
+  color: var(--mb-text);
+  padding: 4px;
+}
+
+body.theme-dark .murder-board-font-select,
+html.dark-mode .murder-board-font-select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath fill='%23fff' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+}
+
+body.theme-dark .murder-board-font-select option,
+html.dark-mode .murder-board-font-select option {
+  background-color: #3a3a3a;
+  color: #ffffff;
+}
+

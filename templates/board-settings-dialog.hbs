@@ -59,48 +59,94 @@
         currentColor=defaultConnectionColor
         label="Default Connection Color"
       }}
+
+      <div class="form-group">
+        <label for="connection-size" class="form-label">Default Connection Size: <span id="size-value">{{defaultConnectionSize}}</span></label>
+        <input 
+          type="range" 
+          id="connection-size" 
+          name="connection-size" 
+          value="{{defaultConnectionSize}}" 
+          min="1" 
+          max="10" 
+          step="1"
+          class="form-range"
+        />
+        <p class="form-help">Set the default thickness for new connections (1 = thin, 10 = very thick)</p>
+      </div>
+
+      {{> font-select 
+        name="default-font"
+        fonts=availableFonts
+        currentFont=defaultFont
+        label="Default Font for New Items"
+      }}
+      <p class="form-help">Choose the default font for all newly created items on this board.</p>
+
+      {{> color-picker 
+        name="default-font-color"
+        colors=connectionColors
+        currentColor=defaultFontColor
+        label="Default Font Color for New Items"
+      }}
+      <p class="form-help">Choose the default text color for all newly created text and note items on this board.</p>
     </div>
 
     <div class="form-section">
       <h3 class="section-title">Player Permissions</h3>
       
       <div class="form-group">
-        <div class="checkbox-group">
-          <label for="allow-players-edit" class="checkbox-label">
-            <input type="checkbox" id="allow-players-edit" name="allow-players-edit" {{#if allowPlayersToEdit}}checked{{/if}} />
-            Allow all players to edit board
-          </label>
+        <div style="overflow-x: auto;">
+          <table class="permission-table" style="width: 100%; border-collapse: collapse;">
+            <thead>
+              <tr style="border-bottom: 2px solid rgba(255,255,255,0.2);">
+                <th style="text-align: left; padding: 8px; font-weight: 600;">Player</th>
+                <th style="text-align: center; padding: 8px; font-weight: 600; width: 100px;">Can View</th>
+                <th style="text-align: center; padding: 8px; font-weight: 600; width: 100px;">Can Edit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {{{playerPermissionTable}}}
+            </tbody>
+          </table>
         </div>
-        <p class="form-help" style="margin-top: 12px;">Restrict these players from editing:</p>
-        <div id="restricted-players-list" class="player-list">
-          {{{playerCheckboxes}}}
+
+        <div style="display: flex; gap: 8px; margin-top: 12px;">
+          <button class="settings-btn" id="toggle-view-all" type="button" style="flex: 1; padding: 6px 12px; font-size: 12px;">
+            View: All
+          </button>
+          <button class="settings-btn" id="toggle-view-none" type="button" style="flex: 1; padding: 6px 12px; font-size: 12px;">
+            View: None
+          </button>
+          <button class="settings-btn" id="toggle-edit-all" type="button" style="flex: 1; padding: 6px 12px; font-size: 12px;">
+            Edit: All
+          </button>
+          <button class="settings-btn" id="toggle-edit-none" type="button" style="flex: 1; padding: 6px 12px; font-size: 12px;">
+            Edit: None
+          </button>
         </div>
       </div>
     </div>
   </form>
 
-  <div class="board-settings-buttons">
-    <button class="settings-btn export-btn" data-action="export">
-      <i class="fas fa-download"></i>
-      Export
-    </button>
-    <button class="settings-btn import-btn" data-action="import">
-      <i class="fas fa-upload"></i>
-      Import
-    </button>
-    <button class="settings-btn save-btn" data-action="save">
-      <i class="fas fa-save"></i>
-      Save
-    </button>
-    {{#if canDeleteBoard}}
-    <button class="settings-btn delete-btn" data-action="delete">
-      <i class="fas fa-trash"></i>
-      Delete Board
-    </button>
-    {{/if}}
-    <button class="settings-btn cancel-btn" data-action="cancel">
-      <i class="fas fa-times"></i>
-      Cancel
-    </button>
+  <div class="board-settings-buttons" style="display: flex; justify-content: space-between;">
+    <div style="display: flex; gap: 8px;">
+      {{#if canDeleteBoard}}
+      <button class="settings-btn delete-btn" data-action="delete">
+        <i class="fas fa-trash"></i>
+        Delete Board
+      </button>
+      {{/if}}
+    </div>
+    <div style="display: flex; gap: 8px;">
+      <button class="settings-btn cancel-btn" data-action="cancel">
+        <i class="fas fa-times"></i>
+        Cancel
+      </button>
+      <button class="settings-btn save-btn" data-action="save">
+        <i class="fas fa-save"></i>
+        Save
+      </button>
+    </div>
   </div>
 </div>

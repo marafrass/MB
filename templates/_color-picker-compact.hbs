@@ -1,0 +1,32 @@
+{{!-- Compact Color Picker for Context Menus --}}
+{{!--
+  Usage: {{> color-picker-compact 
+    label="Note Color"
+    colors=noteColors
+    currentColor=itemColor
+    dataAttribute="data-color"
+  }}
+  
+  Colors array format:
+  [
+    { hex: "#FFFF99", label: "Yellow" },
+    { hex: "#FFB6C1", label: "Pink" }
+  ]
+  
+  Renders a compact horizontal row of color swatches suitable for context menus.
+--}}
+
+<div class="murder-board-context-section" style="display: flex; align-items: center; gap: 8px;">
+  <div class="murder-board-context-section-label" style="margin-bottom: 0; flex-shrink: 0;">{{label}}</div>
+  <div style="display: flex; gap: 4px; flex-wrap: wrap; flex: 1;">
+    {{#each colors}}
+    {{#assign "isSelected" (eq this.hex ../currentColor)}}
+    <button 
+      class="murder-board-color-swatch {{#if isSelected}}selected{{/if}}" 
+      {{dataAttribute}}="{{this.hex}}"
+      style="flex: 1; min-width: 30px; height: 30px; padding: 0; background: {{this.hex}}; border: {{#if isSelected}}3px solid var(--mb-secondary){{else}}2px solid var(--mb-border){{/if}};"
+      title="{{this.label}}"
+    ></button>
+    {{/each}}
+  </div>
+</div>

@@ -1,16 +1,8 @@
 <form class="murder-board-item-form">
-  <div class="form-group">
+  <div class="murder-board-form-group">
     <label for="document-text">Document Text</label>
-    <textarea id="document-text" name="label" placeholder="Enter document text..." autofocus class="form-textarea">{{#if label}}{{label}}{{/if}}</textarea>
+    <textarea id="document-text" name="label" placeholder="Enter document text..." autofocus class="murder-board-textarea">{{#if label}}{{label}}{{/if}}</textarea>
   </div>
-
-  {{> radio-group 
-    name="size"
-    options=documentSizeOptions
-    currentValue=data.size
-    variant="icons"
-    label="Document Size"
-  }}
 
   {{> radio-group 
     name="preset"
@@ -27,15 +19,8 @@
     label="Font Family"
   }}
 
-  {{> color-picker 
-    name="color"
-    colors=colors
-    currentColor=color
-    label="Document Color"
-  }}
-
-  <div class="form-group">
-    <label class="checkbox-label">
+  <div class="murder-board-form-group">
+    <label class="murder-board-checkbox-label">
       <input type="checkbox" name="acceptsConnections" value="on" {{#if acceptsConnections}}checked{{/if}}>
       <span>Accepts Connections</span>
     </label>

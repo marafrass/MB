@@ -1,0 +1,15 @@
+<form class="murder-board-item-form murder-board-quick-form">
+  <div class="murder-board-form-group">
+    <textarea id="quick-text-label" name="text" placeholder="Enter text..." autofocus class="murder-board-textarea">{{data.text}}</textarea>
+  </div>
+
+  <input type="hidden" name="x" value="{{x}}">
+  <input type="hidden" name="y" value="{{y}}">
+
+  {{> dialog-buttons 
+    submitLabel=(localize 'MURDER_BOARD.UI.Save')
+    submitIcon="fa-save"
+    cancelLabel=(localize 'MURDER_BOARD.UI.Cancel')
+    cancelIcon="fa-times"
+  }}
+</form>

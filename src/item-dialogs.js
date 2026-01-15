@@ -31,11 +31,11 @@ export class ItemDialogBase extends HandlebarsApplicationMixin(ApplicationV2) {
     window: {
       icon: 'fas fa-note-sticky',
       title: 'MURDER_BOARD.Dialogs.AddNote',
-      resizable: false,
+      resizable: true,
     },
     position: {
-      width: 400,
-      height: 'auto',
+      width: 600,
+      height: 700,
     },
   };
 
@@ -353,82 +353,47 @@ export class ItemDialogBase extends HandlebarsApplicationMixin(ApplicationV2) {
   _getAvailableFonts() {
     const fonts = [];
 
-    // Use Foundry's FontConfig static methods to get all fonts
-    // This includes core fonts, module fonts, and custom uploaded fonts
-    let allFonts = [];
-    
-    // Method 1: Use getAvailableFontChoices() which returns { fontFamily: "Display Label" }
-    if (typeof CONFIG.FontConfig?.getAvailableFontChoices === 'function') {
-      const fontChoices = CONFIG.FontConfig.getAvailableFontChoices();
-      for (const [fontFamily, label] of Object.entries(fontChoices)) {
-        allFonts.push({
-          value: fontFamily,
-          label: label,
-          family: fontFamily
-        });
-      }
-    }
-    
-    // Method 2: Fallback - Use getAvailableFonts() which returns string array
-    if (allFonts.length === 0 && typeof CONFIG.FontConfig?.getAvailableFonts === 'function') {
-      const fontFamilies = CONFIG.FontConfig.getAvailableFonts();
-      for (const fontFamily of fontFamilies) {
-        allFonts.push({
-          value: fontFamily,
-          label: fontFamily,
-          family: fontFamily
-        });
-      }
-    }
-
-    // Method 3: Direct CONFIG.fontDefinitions if above doesn't work
-    if (allFonts.length === 0 && CONFIG.fontDefinitions) {
-      for (const [fontKey, fontDef] of Object.entries(CONFIG.fontDefinitions)) {
-        allFonts.push({
-          value: fontKey,
-          label: fontDef.label || fontKey,
-          family: fontDef.family || fontKey
-        });
-
-        // Also check nested fonts array within each definition
-        if (fontDef.fonts && Array.isArray(fontDef.fonts)) {
-          for (const nestedFont of fontDef.fonts) {
-            if (nestedFont && nestedFont.name) {
-              if (!allFonts.some(f => f.value === nestedFont.name)) {
-                allFonts.push({
-                  value: nestedFont.name,
-                  label: nestedFont.name,
-                  family: nestedFont.name
-                });
-              }
-            }
-          }
-        }
-      }
-    }
-
-    // Method 4: Check game world settings for custom fonts
+    // Get custom fonts from game.settings (user-uploaded fonts)
     try {
-      const worldFonts = game.settings.get('core', 'fonts');
-      if (worldFonts && typeof worldFonts === 'object') {
-        for (const [fontName, fontDef] of Object.entries(worldFonts)) {
-          if (!allFonts.some(f => f.value === fontName)) {
-            allFonts.push({
-              value: fontName,
-              label: fontName,
-              family: fontName
+      const customFontGroups = game.settings.get('core', 'fonts');
+      
+      if (customFontGroups && typeof customFontGroups === 'object') {
+        for (const [groupName, groupData] of Object.entries(customFontGroups)) {
+          // Each custom font group has a 'fonts' array with actual font definitions
+          if (groupData.fonts && Array.isArray(groupData.fonts)) {
+            for (const fontDef of groupData.fonts) {
+              fonts.push({
+                value: fontDef.name || groupName,
+                label: fontDef.label || fontDef.name || groupName,
+                family: fontDef.family || fontDef.name || groupName
+              });
+            }
+          } else {
+            // Fallback if structure is different
+            fonts.push({
+              value: groupName,
+              label: groupData.label || groupName,
+              family: groupData.family || groupName
             });
           }
         }
       }
-    } catch (e) {
-      // Settings might not be available yet
+    } catch (error) {
+      // Silent fail, continue to core fonts
     }
 
-    // Use discovered fonts
-    fonts.push(...allFonts);
+    // Get core fonts from CONFIG.fontDefinitions
+    if (CONFIG.fontDefinitions) {
+      for (const [fontKey, fontDef] of Object.entries(CONFIG.fontDefinitions)) {
+        fonts.push({
+          value: fontKey,
+          label: fontDef.label || fontKey,
+          family: fontDef.family || fontKey
+        });
+      }
+    }
 
-    // Fallback to common web fonts if still empty
+    // Fallback to common web fonts if no fonts are available at all
     if (fonts.length === 0) {
       const fallbackFonts = [
         { value: 'Arial', label: 'Arial (Clean)', family: 'Arial' },
@@ -481,9 +446,10 @@ export class NoteItemDialog extends ItemDialogBase {
 
   async _prepareContext(options) {
     const baseContext = await super._prepareContext(options);
-    // Ensure data has default font value
+    // Ensure data has default font value - use board default for new items
     if (!baseContext.data.font) {
-      baseContext.data.font = 'Arial';
+      const boardData = MurderBoardData.getGlobalBoardData();
+      baseContext.data.font = boardData.defaultFont || 'Arial';
     }
     if (!baseContext.data.textColor) {
       baseContext.data.textColor = '#000000';
@@ -536,11 +502,15 @@ export class NoteItemDialog extends ItemDialogBase {
       };
 
       if (this.isEdit) {
+        // When editing, only pass the fields that changed - updateItem will preserve everything else
         await MurderBoardData.updateItem(this.scene, this.itemId, {
           label: data.label,
-          color: data.color,
+          color: noteColor,
           acceptsConnections: data.acceptsConnections,
-          data: data.data,
+          data: {
+            textColor: textColor,
+            font: formData.get('font') || 'Arial',
+          },
         });
         ui.notifications.info(game.i18n.localize('MURDER_BOARD.Notifications.ItemUpdated'));
       } else {
@@ -590,9 +560,10 @@ export class TextItemDialog extends ItemDialogBase {
     // Text items should NOT accept connections by default
     baseContext.acceptsConnections = false;
     
-    // Ensure data has default values
+    // Ensure data has default values - use board default font for new items
     if (!baseContext.data.font) {
-      baseContext.data.font = 'Arial';
+      const boardData = MurderBoardData.getGlobalBoardData();
+      baseContext.data.font = boardData.defaultFont || 'Arial';
     }
     if (!baseContext.data.textColor) {
       baseContext.data.textColor = '#000000';
@@ -648,16 +619,19 @@ export class TextItemDialog extends ItemDialogBase {
           textColor: textColor,
           font: formData.get('font') || 'Arial',
           fontSize: parseInt(formData.get('fontSize')) || 14,
-          width: 200, // Default width for text items
-          height: 100, // Default height for text items
         },
       };
 
       if (this.isEdit) {
+        // When editing, only pass the fields that changed - updateItem will preserve everything else
         await MurderBoardData.updateItem(this.scene, this.itemId, {
           label: data.label,
           acceptsConnections: data.acceptsConnections,
-          data: data.data,
+          data: {
+            textColor: textColor,
+            font: formData.get('font') || 'Arial',
+            fontSize: parseInt(formData.get('fontSize')) || 14,
+          },
         });
         ui.notifications.info(game.i18n.localize('MURDER_BOARD.Notifications.ItemUpdated'));
       } else {
@@ -707,14 +681,6 @@ export class ImageItemDialog extends ItemDialogBase {
 
   async _prepareContext(options) {
     const baseContext = await super._prepareContext(options);
-
-    // Image size options
-    baseContext.imageSizeOptions = [
-      { value: 'portrait', label: 'Polaroid', icon: 'fas fa-rectangle-portrait' },
-      { value: 'small', label: 'Small', icon: 'fas fa-square' },
-      { value: 'medium', label: 'Medium', icon: 'fas fa-rectangle' },
-      { value: 'large', label: 'Large', icon: 'fas fa-rectangle' },
-    ];
 
     // Border color options
     baseContext.borderOptions = [
@@ -774,23 +740,27 @@ export class ImageItemDialog extends ItemDialogBase {
       const data = {
         type: 'Image',
         label: formData.get('label') || 'Image',
+        color: formData.get('color') || '#FFFFFF',
         x: x,
         y: y,
         acceptsConnections: formData.get('acceptsConnections') === 'on',
         data: {
           imageUrl: imageUrl,
-          preset: formData.get('preset') || 'medium',
           borderColor: formData.get('borderColor') || 'white',
           fastenerType: formData.get('fastenerType') || 'pushpin',
         },
       };
 
       if (this.isEdit) {
+        // When editing, only pass the fields that changed - updateItem will preserve everything else
         await MurderBoardData.updateItem(this.scene, this.itemId, {
           label: data.label,
-          color: data.color,
           acceptsConnections: data.acceptsConnections,
-          data: data.data,
+          data: {
+            imageUrl: imageUrl,
+            borderColor: formData.get('borderColor') || 'white',
+            fastenerType: formData.get('fastenerType') || 'pushpin',
+          },
         });
         ui.notifications.info(game.i18n.localize('MURDER_BOARD.Notifications.ItemUpdated'));
       } else {
@@ -844,11 +814,9 @@ export class DocumentItemDialog extends ItemDialogBase {
     if (!baseContext.data.preset) {
       baseContext.data.preset = 'blank';
     }
-    if (!baseContext.data.size) {
-      baseContext.data.size = 'medium';
-    }
     if (!baseContext.data.font) {
-      baseContext.data.font = 'Arial';
+      const boardData = MurderBoardData.getGlobalBoardData();
+      baseContext.data.font = boardData.defaultFont || 'Arial';
     }
     
     // Preload color for legal pad preset
@@ -860,14 +828,7 @@ export class DocumentItemDialog extends ItemDialogBase {
     const availableFonts = this._getAvailableFonts();
     baseContext.availableFonts = availableFonts;
 
-    // Document size options
-    baseContext.documentSizeOptions = [
-      { value: 'small', label: 'Small', icon: 'fas fa-square' },
-      { value: 'medium', label: 'Medium', icon: 'fas fa-rectangle' },
-      { value: 'large', label: 'Large', icon: 'fas fa-rectangle' },
-    ];
-
-    // Document preset/type options
+    // Document preset/type options (kept for backwards compatibility with existing items)
     baseContext.documentPresetOptions = [
       { value: 'blank', label: 'Blank', icon: 'fas fa-file' },
       { value: 'looseleaf', label: 'Loose Leaf', icon: 'fas fa-lines-leaning' },
@@ -889,6 +850,12 @@ export class DocumentItemDialog extends ItemDialogBase {
       const rotation = parseFloat(formData.get('rotation')) || 0;
       const documentColor = formData.get('color') || '#FFFFFF';
       
+      // Get existing item if editing to preserve all data
+      let existingItem = null;
+      if (this.isEdit && this.itemId) {
+        existingItem = MurderBoardData.getItem(this.scene, this.itemId);
+      }
+      
       // Track color in palette
       game.murderBoard.ColorManager.addColorToPalette(documentColor);
 
@@ -901,21 +868,22 @@ export class DocumentItemDialog extends ItemDialogBase {
         acceptsConnections: formData.get('acceptsConnections') === 'on',
         data: {
           preset: formData.get('preset') || 'blank',
-          size: formData.get('size') || 'medium',
           font: formData.get('font') || 'Arial',
           rotation: rotation,
         },
       };
 
-      // Track the document color
-      game.murderBoard.ColorManager.addColorToPalette(documentColor);
-
       if (this.isEdit) {
+        // When editing, only pass the fields that changed - updateItem will preserve everything else
         await MurderBoardData.updateItem(this.scene, this.itemId, {
           label: data.label,
-          color: data.color,
+          color: documentColor,
           acceptsConnections: data.acceptsConnections,
-          data: data.data,
+          data: {
+            preset: formData.get('preset') || 'blank',
+            font: formData.get('font') || 'Arial',
+            rotation: rotation,
+          },
         });
         ui.notifications.info(game.i18n.localize('MURDER_BOARD.Notifications.ItemUpdated'));
       } else {
@@ -932,6 +900,313 @@ export class DocumentItemDialog extends ItemDialogBase {
       this.close();
     } catch (error) {
       console.error('Murder Board | Error in DocumentItemDialog:', error);
+      ui.notifications.error('Error: ' + error.message);
+    }
+  }
+}
+
+/**
+ * Quick Note Dialog - Minimal single-input form for fast note creation
+ */
+export class QuickNoteItemDialog extends ItemDialogBase {
+  static DEFAULT_OPTIONS = {
+    ...ItemDialogBase.DEFAULT_OPTIONS,
+    classes: ['murder-board-item-dialog', 'murder-board-quick-dialog'],
+    window: {
+      icon: 'fas fa-note-sticky',
+      title: 'MURDER_BOARD.Dialogs.AddNote',
+    },
+    position: {
+      width: 400,
+      height: 'auto',
+    },
+  };
+
+  get title() {
+    return this.isEdit 
+      ? game.i18n.localize('MURDER_BOARD.Dialogs.EditNote')
+      : game.i18n.localize('MURDER_BOARD.Dialogs.AddNote');
+  }
+
+  static PARTS = {
+    form: {
+      template: 'modules/murder-board/templates/quick-note.hbs',
+    },
+  };
+
+  async _prepareContext(options) {
+    const baseContext = await super._prepareContext(options);
+    return baseContext;
+  }
+
+  async _onRender(context, options) {
+    await super._onRender(context, options);
+  }
+
+  async _onSubmitForm(formData) {
+    try {
+      if (this.isEdit && this.itemId) {
+        // Edit mode - update existing item
+        const updates = {
+          label: formData.get('label') || 'Note',
+        };
+        
+        await MurderBoardData.updateItem(this.scene, this.itemId, updates);
+        
+        // Broadcast to other clients
+        emitSocketMessage('updateItem', {
+          sceneId: this.scene.id,
+          itemId: this.itemId,
+          updates: updates,
+        });
+        
+        this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ItemUpdated'), 'info');
+      } else {
+        // Add mode - create new item
+        const x = parseFloat(formData.get('x')) || 0;
+        const y = parseFloat(formData.get('y')) || 0;
+        
+        // Get default font color from board settings
+        const boardData = MurderBoardData.getGlobalBoardData();
+        const defaultFontColor = boardData.defaultFontColor || '#000000';
+        const defaultFont = boardData.defaultFont || 'Arial';
+        
+        const data = {
+          type: 'Note',
+          label: formData.get('label') || 'Note',
+          color: '#FFFF99', // Default yellow post-it
+          x: x,
+          y: y,
+          acceptsConnections: false,
+          data: {
+            textColor: defaultFontColor,
+            font: defaultFont,
+          },
+        };
+
+        await MurderBoardData.addItem(this.scene, data);
+        this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ItemAdded'), 'info');
+      }
+
+      // Refresh the main board to show updated items
+      if (game.murderBoard.mainBoard) {
+        game.murderBoard.mainBoard.renderer.refresh();
+        game.murderBoard.mainBoard.renderer.draw();
+      }
+
+      this.close();
+    } catch (error) {
+      console.error('Murder Board | Error in QuickNoteItemDialog:', error);
+      ui.notifications.error('Error: ' + error.message);
+    }
+  }
+}
+
+/**
+ * Quick Text Dialog - Minimal single-input form for fast text creation
+ */
+export class QuickTextItemDialog extends ItemDialogBase {
+  static DEFAULT_OPTIONS = {
+    ...ItemDialogBase.DEFAULT_OPTIONS,
+    classes: ['murder-board-item-dialog', 'murder-board-quick-dialog'],
+    window: {
+      icon: 'fas fa-font',
+      title: 'MURDER_BOARD.Dialogs.AddText',
+    },
+    position: {
+      width: 400,
+      height: 'auto',
+    },
+  };
+
+  get title() {
+    return this.isEdit 
+      ? game.i18n.localize('MURDER_BOARD.Dialogs.EditText')
+      : game.i18n.localize('MURDER_BOARD.Dialogs.AddText');
+  }
+
+  static PARTS = {
+    form: {
+      template: 'modules/murder-board/templates/quick-text.hbs',
+    },
+  };
+
+  async _prepareContext(options) {
+    const baseContext = await super._prepareContext(options);
+    return baseContext;
+  }
+
+  async _onRender(context, options) {
+    await super._onRender(context, options);
+  }
+
+  async _onSubmitForm(formData) {
+    try {
+      if (this.isEdit && this.itemId) {
+        // Edit mode - update existing item
+        const updates = {
+          data: {
+            text: formData.get('text') || '',
+          },
+        };
+        
+        await MurderBoardData.updateItem(this.scene, this.itemId, updates);
+        
+        // Broadcast to other clients
+        emitSocketMessage('updateItem', {
+          sceneId: this.scene.id,
+          itemId: this.itemId,
+          updates: updates,
+        });
+        
+        this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ItemUpdated'), 'info');
+      } else {
+        // Add mode - create new item
+        const x = parseFloat(formData.get('x')) || 0;
+        const y = parseFloat(formData.get('y')) || 0;
+        
+        // Get default font color from board settings
+        const boardData = MurderBoardData.getGlobalBoardData();
+        const defaultFontColor = boardData.defaultFontColor || '#000000';
+        const defaultFont = boardData.defaultFont || 'Arial';
+        
+        const data = {
+          type: 'Text',
+          label: formData.get('label') || 'Text',
+          x: x,
+          y: y,
+          acceptsConnections: false,
+          data: {
+            textColor: defaultFontColor,
+            font: defaultFont,
+            fontSize: 14,
+          },
+        };
+
+        await MurderBoardData.addItem(this.scene, data);
+        this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ItemAdded'), 'info');
+      }
+
+      // Refresh the main board to show updated items
+      if (game.murderBoard.mainBoard) {
+        game.murderBoard.mainBoard.renderer.refresh();
+        game.murderBoard.mainBoard.renderer.draw();
+      }
+
+      this.close();
+    } catch (error) {
+      console.error('Murder Board | Error in QuickTextItemDialog:', error);
+      ui.notifications.error('Error: ' + error.message);
+    }
+  }
+}
+
+/**
+ * Quick Document Dialog - Minimal single-input form for fast document text editing
+ */
+export class QuickDocumentItemDialog extends ItemDialogBase {
+  static DEFAULT_OPTIONS = {
+    ...ItemDialogBase.DEFAULT_OPTIONS,
+    classes: ['murder-board-item-dialog', 'murder-board-quick-dialog'],
+    window: {
+      icon: 'fas fa-file',
+      title: 'MURDER_BOARD.Dialogs.AddDocument',
+    },
+    position: {
+      width: 400,
+      height: 'auto',
+    },
+  };
+
+  get title() {
+    return this.isEdit 
+      ? game.i18n.localize('MURDER_BOARD.Dialogs.EditDocument')
+      : game.i18n.localize('MURDER_BOARD.Dialogs.AddDocument');
+  }
+
+  static PARTS = {
+    form: {
+      template: 'modules/murder-board/templates/quick-document.hbs',
+    },
+  };
+
+  async _prepareContext(options) {
+    const baseContext = await super._prepareContext(options);
+    
+    // Ensure data.text exists (for backwards compatibility with old Documents)
+    if (!baseContext.data) {
+      baseContext.data = {};
+    }
+    if (baseContext.data.text === undefined) {
+      // Initialize from label if text doesn't exist
+      baseContext.data.text = baseContext.label || '';
+    }
+    
+    return baseContext;
+  }
+
+  async _onRender(context, options) {
+    await super._onRender(context, options);
+  }
+
+  async _onSubmitForm(formData) {
+    try {
+      if (this.isEdit && this.itemId) {
+        // Edit mode - update existing item's text
+        const updates = {
+          data: {
+            text: formData.get('text') || '',
+          },
+        };
+        
+        await MurderBoardData.updateItem(this.scene, this.itemId, updates);
+        
+        // Broadcast to other clients
+        emitSocketMessage('updateItem', {
+          sceneId: this.scene.id,
+          itemId: this.itemId,
+          updates: updates,
+        });
+        
+        this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ItemUpdated'), 'info');
+      } else {
+        // Add mode - create new item
+        const x = parseFloat(formData.get('x')) || 0;
+        const y = parseFloat(formData.get('y')) || 0;
+        
+        // Get default font from board settings
+        const boardData = MurderBoardData.getGlobalBoardData();
+        const defaultFont = boardData.defaultFont || 'Arial';
+        
+        const data = {
+          type: 'Document',
+          label: 'Document',
+          color: '#FFFEF5',
+          x: x,
+          y: y,
+          acceptsConnections: false,
+          data: {
+            text: formData.get('text') || '',
+            preset: 'blank',
+            font: defaultFont,
+            width: 200,
+            height: 260,
+          },
+        };
+
+        await MurderBoardData.addItem(this.scene, data);
+        this._notify(game.i18n.localize('MURDER_BOARD.Notifications.ItemAdded'), 'info');
+      }
+
+      // Refresh the main board to show updated items
+      if (game.murderBoard.mainBoard) {
+        game.murderBoard.mainBoard.renderer.refresh();
+        game.murderBoard.mainBoard.renderer.draw();
+      }
+
+      this.close();
+    } catch (error) {
+      console.error('Murder Board | Error in QuickDocumentItemDialog:', error);
       ui.notifications.error('Error: ' + error.message);
     }
   }

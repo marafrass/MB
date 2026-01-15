@@ -39,6 +39,19 @@ export function initializeSocketHandler() {
     socket.register('deleteConnection', _handleDeleteConnection);
     socket.register('clearBoard', _handleClearBoard);
     socket.register('refreshBoard', _handleRefreshBoard);
+    socket.register('bringToFront', _handleBringToFront);
+    socket.register('bringForward', _handleBringForward);
+    socket.register('sendBackward', _handleSendBackward);
+    socket.register('sendToBack', _handleSendToBack);
+    socket.register('createGroup', _handleCreateGroup);
+    socket.register('ungroup', _handleUngroup);
+    socket.register('bringGroupToFront', _handleBringGroupToFront);
+    socket.register('sendGroupToBack', _handleSendGroupToBack);
+    socket.register('duplicateItems', _handleDuplicateItems);
+    
+    // Global board handlers
+    socket.register('setCurrentBoardId', _handleSetCurrentBoardId);
+    socket.register('setGlobalBoards', _handleSetGlobalBoards);
   } catch (error) {
     console.error(`${MODULE_ID} | Error registering socket module:`, error);
   }
@@ -154,6 +167,38 @@ const _handleDeleteConnection = _createSocketHandler((scene, { connectionId }) =
 );
 
 /**
+ * Handle bringing an item to front via socket
+ * @private
+ */
+const _handleBringToFront = _createSocketHandler((scene, { itemId }) => 
+  MurderBoardData.bringToFront(scene, itemId)
+);
+
+/**
+ * Handle bringing an item forward via socket
+ * @private
+ */
+const _handleBringForward = _createSocketHandler((scene, { itemId }) => 
+  MurderBoardData.bringForward(scene, itemId)
+);
+
+/**
+ * Handle sending an item backward via socket
+ * @private
+ */
+const _handleSendBackward = _createSocketHandler((scene, { itemId }) => 
+  MurderBoardData.sendBackward(scene, itemId)
+);
+
+/**
+ * Handle sending an item to back via socket
+ * @private
+ */
+const _handleSendToBack = _createSocketHandler((scene, { itemId }) => 
+  MurderBoardData.sendToBack(scene, itemId)
+);
+
+/**
  * Handle clearing the board via socket
  * @private
  */
@@ -217,6 +262,162 @@ function _refreshBoardsForScene(scene) {
       app.scene?.id === scene.id
     ) {
       // Only redraw canvas, don't re-render the full application
+      if (app.renderer && typeof app.renderer.draw === 'function') {
+        app.renderer.draw();
+      }
+    }
+  }
+}
+
+/**
+ * Handle setting the global current board ID via socket
+ * @private
+ */
+async function _handleSetCurrentBoardId({ boardId }) {
+  await game.settings.set(MODULE_ID, 'globalCurrentBoardId', boardId);
+  
+  // Refresh all Murder Board applications
+  for (const app of Object.values(ui.windows)) {
+    if (app.constructor.name === 'MurderBoardApplication') {
+      await app.render();
+    }
+  }
+}
+
+/**
+ * Handle setting global boards via socket
+ * @private
+ */
+async function _handleSetGlobalBoards({ boards }) {
+  console.log('Murder Board | Socket: setGlobalBoards received. First board defaultFontColor:', boards[0]?.defaultFontColor);
+  
+  // Set a flag to prevent recursive socket emissions
+  if (window.game.murderBoard) {
+    window.game.murderBoard._isReceivingSocketUpdate = true;
+  }
+  
+  await game.settings.set(MODULE_ID, 'globalBoards', boards);
+  console.log('Murder Board | Socket: setGlobalBoards saved. Verifying...', game.settings.get(MODULE_ID, 'globalBoards')[0]?.defaultFontColor);
+  
+  // Clear the flag after a short delay
+  setTimeout(() => {
+    if (window.game.murderBoard) {
+      window.game.murderBoard._isReceivingSocketUpdate = false;
+    }
+  }, 100);
+  
+  // Refresh all Murder Board applications
+  for (const app of Object.values(ui.windows)) {
+    if (app.constructor.name === 'MurderBoardApplication') {
+      await app.render();
+    }
+  }
+}
+/**
+ * Handle creating a group via socket
+ * @private
+ */
+async function _handleCreateGroup({ itemIds }) {
+  await MurderBoardData.createGroup(itemIds);
+  
+  // Refresh all Murder Board applications
+  for (const app of Object.values(ui.windows)) {
+    if (app.constructor.name === 'MurderBoardApplication') {
+      if (app.renderer && typeof app.renderer.draw === 'function') {
+        app.renderer.draw();
+      }
+    }
+  }
+}
+
+/**
+ * Handle ungrouping via socket
+ * @private
+ */
+async function _handleUngroup({ groupId }) {
+  await MurderBoardData.ungroup(groupId);
+  
+  // Refresh all Murder Board applications
+  for (const app of Object.values(ui.windows)) {
+    if (app.constructor.name === 'MurderBoardApplication') {
+      if (app.renderer && typeof app.renderer.draw === 'function') {
+        app.renderer.draw();
+      }
+    }
+  }
+}
+
+/**
+ * Handle bringing group to front via socket
+ * @private
+ */
+async function _handleBringGroupToFront({ groupId }) {
+  await MurderBoardData.bringGroupToFront(groupId);
+  
+  // Refresh all Murder Board applications
+  for (const app of Object.values(ui.windows)) {
+    if (app.constructor.name === 'MurderBoardApplication') {
+      if (app.renderer && typeof app.renderer.draw === 'function') {
+        app.renderer.draw();
+      }
+    }
+  }
+}
+/**
+ * Handle duplicating items via socket
+ * @private
+ */
+async function _handleDuplicateItems({ itemIds, offset }) {
+  const boardData = MurderBoardData.getGlobalBoardData();
+  const newItemIds = [];
+
+  // Duplicate each item
+  for (const itemId of itemIds) {
+    const originalItem = boardData.items.find(item => item.id === itemId);
+    if (!originalItem) {
+      console.warn(`${MODULE_ID} | Item not found: ${itemId}`);
+      continue;
+    }
+
+    // Create a copy with an offset position
+    const duplicate = {
+      id: foundry.utils.randomID(),
+      type: originalItem.type,
+      label: originalItem.label,
+      x: originalItem.x + offset.x,
+      y: originalItem.y + offset.y,
+      color: originalItem.color,
+      width: originalItem.width,
+      height: originalItem.height,
+      data: { ...originalItem.data }, // Deep copy the data
+    };
+
+    boardData.items.push(duplicate);
+    newItemIds.push(duplicate.id);
+  }
+
+  // Save the updated board data
+  await MurderBoardData.saveGlobalBoardData(boardData);
+
+  // Refresh all Murder Board applications
+  for (const app of Object.values(ui.windows)) {
+    if (app.constructor.name === 'MurderBoardApplication') {
+      if (app.renderer && typeof app.renderer.draw === 'function') {
+        app.renderer.draw();
+      }
+    }
+  }
+}
+/**
+ * Handle sending group to back via socket
+ * @private
+ */
+async function _handleSendGroupToBack({ groupId }) {
+  await MurderBoardData.sendGroupToBack(groupId);
+  
+  // Refresh all Murder Board applications
+  for (const app of Object.values(ui.windows)) {
+    if (app.constructor.name === 'MurderBoardApplication') {
       if (app.renderer && typeof app.renderer.draw === 'function') {
         app.renderer.draw();
       }
